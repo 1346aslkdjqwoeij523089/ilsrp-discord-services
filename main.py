@@ -4,6 +4,8 @@ from nextcord.ext import commands
 from nextcord.utils import utcnow
 import asyncio
 import chat_exporter
+import requests
+import json
 
 # ------------------------------
 # Render Web Service Fix (IMPORTANT)
@@ -818,6 +820,430 @@ async def sendpanel(interaction: nextcord.Interaction):
     )
 
 
+# =========================================================
+# =================== SESSION MANAGEMENT ====================
+# =========================================================
+
+# Management+ role IDs (for permission check)
+MANAGEMENT_ROLE_IDS = [
+    1471641915215843559,  # Management
+    1471642126663024640,  # Executive
+    1471642360503992411,  # Holding
+    1471642523821674618,  # Owner
+    1471642550271082690,  # Co-Owner
+]
+
+# Session channel ID where session messages are sent
+SESSION_CHANNEL_ID = 1473150653374271491  # You'll need to update this to your actual session channel
+
+# Session ping role ID
+SESSION_PING_ROLE_ID = 1473466540430200862
+
+# Checkmark emoji for voting
+CHECKMARK_EMOJI = "<:Checkmark:1473460905634431109>"
+
+# ERLC API URL (Police Roleplay Community API)
+ERLC_API_URL = "https://api.policeroleplay.community/v1/server/stats"
+
+# Your server's private server ID (you need to set this)
+ERLC_SERVER_ID = "YOUR_SERVER_ID"  # Replace with your actual server ID
+
+def has_management_role(member):
+    """Check if member has Management+ role"""
+    member_role_ids = [role.id for role in member.roles]
+    return any(rid in member_role_ids for rid in MANAGEMENT_ROLE_IDS)
+
+async def get_erlc_stats():
+    """Fetch ERLC server stats from Police Roleplay Community API"""
+    api_key = os.getenv("POLICE_ROLEPLAY_API_KEY")
+    if not api_key:
+        print("POLICE_ROLEPLAY_API_KEY not set in environment variables")
+        return None
+    
+    try:
+        headers = {
+            "x-api-key": api_key,
+            "Content-Type": "application/json"
+        }
+        # Using the server stats endpoint from the API docs
+        response = requests.get(ERLC_API_URL, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            # Parse the response based on API format
+            return {
+                "players": data.get("playerCount", 0),
+                "staff": data.get("staffCount", 0),
+                "queue": data.get("queueCount", 0),
+                "max_players": data.get("maxPlayers", 0)
+            }
+        else:
+            print(f"ERLC API Error: Status {response.status_code}")
+    except Exception as e:
+        print(f"ERLC API Error: {e}")
+    return None
+
+class SessionManagementView(nextcord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+    
+    @nextcord.ui.button(label="Session Vote", style=nextcord.ButtonStyle.primary, emoji="🗳️", custom_id="session_vote")
+    async def session_vote(self, button, interaction):
+        if not has_management_role(interaction.user):
+            await interaction.response.send_message(
+                "❌ You are not permitted to use this feature. It is restricted to Management+ members of Illinois State Roleplay's Staff Team.",
+                ephemeral=True
+            )
+            return
+        
+        await interaction.response.send_message(
+            "Please specify the number of votes required to start a session:",
+            ephemeral=True
+        )
+        
+        # Send a modal to get vote count
+        modal = SessionVoteModal()
+        await interaction.response.send_modal(modal)
+    
+    @nextcord.ui.button(label="Session Start", style=nextcord.ButtonStyle.success, emoji="▶️", custom_id="session_start")
+    async def session_start(self, button, interaction):
+        if not has_management_role(interaction.user):
+            await interaction.response.send_message(
+                "❌ You are not permitted to use this feature. It is restricted to Management+ members of Illinois State Roleplay's Staff Team.",
+                ephemeral=True
+            )
+            return
+        
+        await interaction.response.defer()
+        
+        session_channel = interaction.guild.get_channel(SESSION_CHANNEL_ID)
+        if not session_channel:
+            await interaction.followup.send("❌ Session channel not found.", ephemeral=True)
+            return
+        
+        # Get ERLC stats
+        stats = await get_erlc_stats()
+        
+        embed = nextcord.Embed(
+            title="🎮 Session Started",
+            description=f"**{interaction.user.mention}** has started a session!",
+            color=BLUE,
+            timestamp=utcnow()
+        )
+        
+        if stats:
+            embed.add_field(name="👥 Players In-Game", value=f"{stats['players']}/{stats['max_players']}", inline=True)
+            embed.add_field(name="👮 Staff In-Game", value=str(stats['staff']), inline=True)
+            embed.add_field(name="📋 Queue", value=str(stats['queue']), inline=True)
+        
+        await session_channel.send(
+            content=f"<@&{SESSION_PING_ROLE_ID}>",
+            embed=embed
+        )
+        await interaction.followup.send("✅ Session started message sent!", ephemeral=True)
+    
+    @nextcord.ui.button(label="Session Shutdown", style=nextcord.ButtonStyle.danger, emoji="⏹️", custom_id="session_shutdown")
+    async def session_shutdown(self, button, interaction):
+        if not has_management_role(interaction.user):
+            await interaction.response.send_message(
+                "❌ You are not permitted to use this feature. It is restricted to Management+ members of Illinois State Roleplay's Staff Team.",
+                ephemeral=True
+            )
+            return
+        
+        await interaction.response.defer()
+        
+        session_channel = interaction.guild.get_channel(SESSION_CHANNEL_ID)
+        if not session_channel:
+            await interaction.followup.send("❌ Session channel not found.", ephemeral=True)
+            return
+        
+        embed = nextcord.Embed(
+            title="🔴 Session Ended",
+            description="The current session has been shut down.",
+            color=0xFF0000,
+            timestamp=utcnow()
+        )
+        embed.set_author(name=f"{interaction.user}", icon_url=interaction.user.display_avatar.url)
+        
+        await session_channel.send(embed=embed)
+        await interaction.followup.send("✅ Session shutdown message sent!", ephemeral=True)
+    
+    @nextcord.ui.button(label="Session Low", style=nextcord.ButtonStyle.secondary, emoji="📢", custom_id="session_low")
+    async def session_low(self, button, interaction):
+        if not has_management_role(interaction.user):
+            await interaction.response.send_message(
+                "❌ You are not permitted to use this feature. It is restricted to Management+ members of Illinois State Roleplay's Staff Team.",
+                ephemeral=True
+            )
+            return
+        
+        await interaction.response.defer()
+        
+        session_channel = interaction.guild.get_channel(SESSION_CHANNEL_ID)
+        if not session_channel:
+            await interaction.followup.send("❌ Session channel not found.", ephemeral=True)
+            return
+        
+        embed = nextcord.Embed(
+            title="📢 Session Needs Boost!",
+            description="The session needs more players! Come join us!",
+            color=BLUE,
+            timestamp=utcnow()
+        )
+        
+        await session_channel.send(
+            content=f"<@&{SESSION_PING_ROLE_ID}> @here",
+            embed=embed
+        )
+        await interaction.followup.send("✅ Session low ping sent!", ephemeral=True)
+    
+    @nextcord.ui.button(label="Session Full", style=nextcord.ButtonStyle.secondary, emoji="✅", custom_id="session_full")
+    async def session_full(self, button, interaction):
+        if not has_management_role(interaction.user):
+            await interaction.response.send_message(
+                "❌ You are not permitted to use this feature. It is restricted to Management+ members of Illinois State Roleplay's Staff Team.",
+                ephemeral=True
+            )
+            return
+        
+        await interaction.response.defer()
+        
+        session_channel = interaction.guild.get_channel(SESSION_CHANNEL_ID)
+        if not session_channel:
+            await interaction.followup.send("❌ Session channel not found.", ephemeral=True)
+            return
+        
+        embed = nextcord.Embed(
+            title="✅ Session Full",
+            description="The session is currently full. Please wait for the next session!",
+            color=BLUE,
+            timestamp=utcnow()
+        )
+        
+        await session_channel.send(embed=embed)
+        await interaction.followup.send("✅ Session full message sent!", ephemeral=True)
+
+class SessionVoteModal(nextcord.ui.Modal):
+    def __init__(self):
+        super().__init__("Session Vote Setup")
+        self.vote_count = nextcord.ui.TextInput(
+            label="Number of votes required",
+            style=nextcord.TextInputStyle.short,
+            required=True,
+            placeholder="Enter number (e.g., 10)"
+        )
+        self.add_item(self.vote_count)
+
+    async def callback(self, interaction: nextcord.Interaction):
+        try:
+            required_votes = int(self.vote_count.value)
+        except ValueError:
+            await interaction.response.send_message("❌ Please enter a valid number.", ephemeral=True)
+            return
+        
+        await interaction.response.defer(ephemeral=True)
+        
+        session_channel = interaction.guild.get_channel(SESSION_CHANNEL_ID)
+        if not session_channel:
+            await interaction.followup.send("❌ Session channel not found.", ephemeral=True)
+            return
+        
+        # Create vote embed
+        embed = nextcord.Embed(
+            title="🗳️ Session Vote",
+            description=f"**{interaction.user.mention}** is starting a session vote!\n\n"
+                       f"React with {CHECKMARK_EMOJI} to vote!\n\n"
+                       f"**Votes: 0/{required_votes}**",
+            color=BLUE,
+            timestamp=utcnow()
+        )
+        embed.set_author(name=f"{interaction.user}", icon_url=interaction.user.display_avatar.url)
+        
+        vote_message = await session_channel.send(
+            content=f"<@&{SESSION_PING_ROLE_ID}>",
+            embed=embed
+        )
+        
+        # Add checkmark reaction
+        try:
+            await vote_message.add_reaction(CHECKMARK_EMOJI)
+        except:
+            # Try with unicode emoji if custom emoji fails
+            await vote_message.add_reaction("✅")
+        
+        # Store vote info for tracking
+        if not hasattr(bot, 'session_votes'):
+            bot.session_votes = {}
+        
+        bot.session_votes[vote_message.id] = {
+            "required": required_votes,
+            "current": 0,
+            "initiator": interaction.user.id,
+            "channel_id": session_channel.id,
+            "message_id": vote_message.id
+        }
+        
+        await interaction.followup.send(
+            f"✅ Session vote started! Required votes: **{required_votes}**\n"
+            f"Vote message sent in {session_channel.mention}",
+            ephemeral=True
+        )
+
+class StartSessionButton(nextcord.ui.View):
+    def __init__(self, initiator_id):
+        super().__init__(timeout=None)
+        self.initiator_id = initiator_id
+    
+    @nextcord.ui.button(label="Start Session", style=nextcord.ButtonStyle.success, emoji="▶️", custom_id="start_session_btn")
+    async def start_session(self, button, interaction):
+        if interaction.user.id != self.initiator_id:
+            await interaction.response.send_message(
+                "❌ Only the vote initiator can start the session.",
+                ephemeral=True
+            )
+            return
+        
+        await interaction.response.defer()
+        
+        session_channel = interaction.guild.get_channel(SESSION_CHANNEL_ID)
+        if not session_channel:
+            await interaction.followup.send("❌ Session channel not found.", ephemeral=True)
+            return
+        
+        # Get ERLC stats
+        stats = await get_erlc_stats()
+        
+        embed = nextcord.Embed(
+            title="🎮 Session Started",
+            description=f"**{interaction.user.mention}** has started a session!",
+            color=BLUE,
+            timestamp=utcnow()
+        )
+        
+        if stats:
+            embed.add_field(name="👥 Players In-Game", value=f"{stats['players']}/{stats['max_players']}", inline=True)
+            embed.add_field(name="👮 Staff In-Game", value=str(stats['staff']), inline=True)
+            embed.add_field(name="📋 Queue", value=str(stats['queue']), inline=True)
+        
+        await session_channel.send(
+            content=f"<@&{SESSION_PING_ROLE_ID}>",
+            embed=embed
+        )
+        
+        # Update the original vote message
+        try:
+            original_channel = interaction.guild.get_channel(SESSION_CHANNEL_ID)
+            if original_channel:
+                original_message = await original_channel.fetch_message(bot.session_votes.get(interaction.message.id, {}).get("message_id", 0))
+                if original_message:
+                    embed_update = nextcord.Embed(
+                        title="✅ Session Started!",
+                        description=f"The session has been started by {interaction.user.mention}!",
+                        color=0x00FF00,
+                        timestamp=utcnow()
+                    )
+                    await original_message.edit(embed=embed_update, view=None)
+        except:
+            pass
+        
+        await interaction.followup.send("✅ Session started successfully!", ephemeral=True)
+        
+        # Remove from vote tracking
+        if hasattr(bot, 'session_votes') and interaction.message.id in bot.session_votes:
+            del bot.session_votes[interaction.message.id]
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    """Handle vote reactions"""
+    if not hasattr(bot, 'session_votes'):
+        return
+    
+    if payload.message_id not in bot.session_votes:
+        return
+    
+    # Get the message
+    channel = bot.get_channel(payload.channel_id)
+    if not channel:
+        return
+    
+    try:
+        message = await channel.fetch_message(payload.message_id)
+    except:
+        return
+    
+    # Check if reaction is the checkmark
+    emoji_str = str(payload.emoji)
+    if CHECKMARK_EMOJI not in emoji_str and "✅" not in emoji_str:
+        return
+    
+    # Don't count bot's own reaction
+    if payload.user_id == bot.user.id:
+        return
+    
+    # Get user
+    user = channel.guild.get_member(payload.user_id)
+    if not user:
+        return
+    
+    # Get vote info
+    vote_info = bot.session_votes[payload.message_id]
+    vote_info["current"] += 1
+    current_votes = vote_info["current"]
+    required_votes = vote_info["required"]
+    
+    # Update embed with new vote count
+    initiator = channel.guild.get_member(vote_info["initiator"])
+    initiator_mention = initiator.mention if initiator else "Unknown"
+    
+    embed = nextcord.Embed(
+        title="🗳️ Session Vote",
+        description=f"**{initiator_mention}** is starting a session vote!\n\n"
+                   f"React with {CHECKMARK_EMOJI} to vote!\n\n"
+                   f"**Votes: {current_votes}/{required_votes}**",
+        color=BLUE,
+        timestamp=utcnow()
+    )
+    embed.set_author(name=f"{initiator}", icon_url=initiator.display_avatar.url if initiator else None)
+    
+    # Check if vote threshold reached
+    if current_votes >= required_votes:
+        # Add Start Session button
+        view = StartSessionButton(vote_info["initiator"])
+        embed.description = f"**{initiator_mention}**'s session vote has passed!\n\n" \
+                           f"✅ **{current_votes}/{required_votes}** votes reached!\n\n" \
+                           f"Click below to start the session:"
+        embed.color = 0x00FF00
+        await message.edit(embed=embed, view=view)
+    else:
+        await message.edit(embed=embed)
+
+@bot.slash_command(name="sessionmanagement", description="Manage server sessions")
+async def session_management(interaction: nextcord.Interaction):
+    """Send the session management panel"""
+    if not has_management_role(interaction.user):
+        await interaction.response.send_message(
+            "❌ You are not permitted to use this feature. It is restricted to Management+ members of Illinois State Roleplay's Staff Team.",
+            ephemeral=True
+        )
+        return
+    
+    embed = nextcord.Embed(
+        title="🎮 Session Management",
+        description="Select an action below:",
+        color=BLUE,
+        timestamp=utcnow()
+    )
+    embed.add_field(name="🗳️ Session Vote", value="Start a vote for a new session", inline=False)
+    embed.add_field(name="▶️ Session Start", value="Start a new session with ERLC stats", inline=False)
+    embed.add_field(name="⏹️ Session Shutdown", value="End the current session", inline=False)
+    embed.add_field(name="📢 Session Low", value="Ping for more players", inline=False)
+    embed.add_field(name="✅ Session Full", value="Mark session as full (no ping)", inline=False)
+    embed.set_footer(text="Illinois State Roleplay - Session Management")
+    
+    view = SessionManagementView()
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
 # ------------------------------
 # Keep-alive / Activity Logistic
 # ------------------------------
@@ -831,6 +1257,7 @@ async def on_ready():
         print(f"Slash sync failed: {e}")
 
     bot.add_view(TicketPanel())
+    bot.add_view(SessionManagementView())
 
     keepalive_channel = bot.get_channel(1473152268411998410)
 
