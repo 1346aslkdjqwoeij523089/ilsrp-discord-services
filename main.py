@@ -16,15 +16,15 @@ intents.message_content = True
 # ------------------------------
 bot = commands.Bot(command_prefix=";", intents=intents)
 
+LOG_CHANNEL_ID = 1473167409505374220  # Logging channel
+
 # ------------------------------
 # Member join event
 # ------------------------------
 @bot.event
 async def on_member_join(member):
     channel = bot.get_channel(1471660664022896902)  # Welcome channel
-
     if channel:
-        # Count members excluding bots
         member_count = len([m for m in member.guild.members if not m.bot])
 
         def ordinal(n):
@@ -49,12 +49,29 @@ async def on_member_join(member):
         await channel.send(welcome_message)
 
 # ------------------------------
+# Command Logging Helper
+# ------------------------------
+async def log_command(user, command_name, ctx_type):
+    log_channel = bot.get_channel(LOG_CHANNEL_ID)
+    if log_channel:
+        embed = nextcord.Embed(
+            title="Command Executed",
+            color=0x4bbfff,
+            timestamp=utcnow()
+        )
+        embed.set_author(name=f"{user}", icon_url=user.display_avatar.url)
+        embed.add_field(name="Command", value=command_name, inline=True)
+        embed.add_field(name="Type", value=ctx_type, inline=True)
+        await log_channel.send(embed=embed)
+
+# ------------------------------
 # SAY PREFIX COMMAND
 # ------------------------------
 ALLOWED_ROLE_IDS = [1471642126663024640, 1471642360503992411]
 
 @bot.command(name="say")
 async def say_prefix(ctx, *, message: str):
+    await log_command(ctx.author, "say", "Prefix")
     if any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles):
         try:
             await ctx.message.delete()
@@ -69,6 +86,7 @@ async def say_prefix(ctx, *, message: str):
 # ------------------------------
 @bot.slash_command(name="say", description="Repeat a message (Executive & Holding only)")
 async def say_slash(interaction: nextcord.Interaction, *, message: str):
+    await log_command(interaction.user, "say", "Slash")
     if any(role.id in ALLOWED_ROLE_IDS for role in interaction.user.roles):
         await interaction.response.send_message(message)
     else:
@@ -82,22 +100,18 @@ async def say_slash(interaction: nextcord.Interaction, *, message: str):
 # ------------------------------
 @bot.command(name="requesttraining")
 async def requesttraining_prefix(ctx):
-    # Channel restriction
+    await log_command(ctx.author, "requesttraining", "Prefix")
     if ctx.channel.id != 1473150653374271491:
         await ctx.send(f"❌ {ctx.author.mention}, you can't use this command here.")
         return
-
-    # Role restriction
     allowed_role_id = 1472037174630285538
     if allowed_role_id not in [role.id for role in ctx.author.roles]:
         await ctx.send(f"❌ {ctx.author.mention}, you do not have permission to use this command.")
         return
-
     target_channel = bot.get_channel(1473150653374271491)
     if not target_channel:
         await ctx.send("❌ Could not find the target channel.")
         return
-
     embed = nextcord.Embed(
         title="Greetings, Staff Trainers",
         description=(
@@ -106,7 +120,6 @@ async def requesttraining_prefix(ctx):
         ),
         color=0x4bbfff
     )
-
     await target_channel.send(content="<@&1473151069264678932>", embed=embed)
     await ctx.send(f"✅ {ctx.author.mention}, your training request has been sent!", delete_after=5)
 
@@ -115,15 +128,13 @@ async def requesttraining_prefix(ctx):
 # ------------------------------
 @bot.slash_command(name="requesttraining", description="Request a staff training session")
 async def requesttraining_slash(interaction: nextcord.Interaction):
-    # Channel restriction
+    await log_command(interaction.user, "requesttraining", "Slash")
     if interaction.channel_id != 1473150653374271491:
         await interaction.response.send_message(
             f"❌ {interaction.user.mention}, you can't use this command here.",
             ephemeral=True
         )
         return
-
-    # Role restriction
     allowed_role_id = 1472037174630285538
     if allowed_role_id not in [role.id for role in interaction.user.roles]:
         await interaction.response.send_message(
@@ -131,12 +142,10 @@ async def requesttraining_slash(interaction: nextcord.Interaction):
             ephemeral=True
         )
         return
-
     target_channel = bot.get_channel(1473150653374271491)
     if not target_channel:
         await interaction.response.send_message("❌ Could not find the target channel.")
         return
-
     embed = nextcord.Embed(
         title="Greetings, Staff Trainers",
         description=(
@@ -145,7 +154,6 @@ async def requesttraining_slash(interaction: nextcord.Interaction):
         ),
         color=0x4bbfff
     )
-
     await target_channel.send(content="<@&1473151069264678932>", embed=embed)
     await interaction.response.send_message(
         f"✅ {interaction.user.mention}, your training request has been sent!",
@@ -153,12 +161,11 @@ async def requesttraining_slash(interaction: nextcord.Interaction):
     )
 
 # ------------------------------
-# Keep-alive task
+# Keep-alive / Activity Logistic
 # ------------------------------
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}!")
-
     try:
         await bot.sync_all_application_commands()
         print("Slash commands synced!")
@@ -171,11 +178,17 @@ async def on_ready():
         await bot.wait_until_ready()
         while not bot.is_closed():
             if keepalive_channel:
-                try:
-                    await keepalive_channel.send("\u200b")
-                except nextcord.Forbidden:
-                    pass
-            await asyncio.sleep(1800)  # 30 minutes
+                embed = nextcord.Embed(
+                    title="__Activity Logistic__",
+                    description=(
+                        "> This message is being sent to ensure that the bot keeps running smoothly.\n"
+                        f"> Timestamp of Logistic: <t:{int(utcnow().timestamp())}:F>"
+                    ),
+                    color=0x4bbfff,
+                    timestamp=utcnow()
+                )
+                await keepalive_channel.send(embed=embed)
+            await asyncio.sleep(60)  # 1 minute
 
     bot.loop.create_task(keep_sending())
 
