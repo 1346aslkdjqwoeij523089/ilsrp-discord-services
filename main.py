@@ -385,8 +385,9 @@ async def sendpanel(interaction: nextcord.Interaction):
 
     await interaction.channel.send(
         embed=embed,
-        view=TicketDropdownView()
+        view=TicketPanel()
     )
+
 
     await interaction.response.send_message(
         "✅ Ticket panel sent.",
