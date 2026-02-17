@@ -27,7 +27,6 @@ async def on_member_join(member):
         # Count members excluding bots
         member_count = len([m for m in member.guild.members if not m.bot])
 
-        # Function to get ordinal (1st, 2nd, 3rd, etc.)
         def ordinal(n):
             if 10 <= n % 100 <= 20:
                 suffix = "th"
@@ -50,63 +49,48 @@ async def on_member_join(member):
         await channel.send(welcome_message)
 
 # ------------------------------
-# SAY COMMAND (Prefix + Slash)
+# SAY PREFIX COMMAND
 # ------------------------------
 ALLOWED_ROLE_IDS = [1471642126663024640, 1471642360503992411]
 
-@bot.hybrid_command(name="say", description="Repeat a message (Executive & Holding only)")
-async def say(ctx, *, message: str):
-
+@bot.command(name="say")
+async def say_prefix(ctx, *, message: str):
     if any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles):
-
-        # Delete only if prefix command
-        if ctx.interaction is None:
-            try:
-                await ctx.message.delete()
-            except nextcord.Forbidden:
-                pass
-
+        try:
+            await ctx.message.delete()
+        except nextcord.Forbidden:
+            pass
         await ctx.send(message)
-
     else:
-        if ctx.interaction:
-            await ctx.send(
-                f"❌ {ctx.author.mention}, you don't have permission to use this command.",
-                ephemeral=True
-            )
-        else:
-            await ctx.send(f"❌ {ctx.author.mention}, you don't have permission to use this command.")
+        await ctx.send(f"❌ {ctx.author.mention}, you don't have permission to use this command.")
 
 # ------------------------------
-# REQUEST TRAINING (Prefix + Slash)
+# SAY SLASH COMMAND
 # ------------------------------
-@bot.hybrid_command(
-    name="requesttraining",
-    description="Request a staff training session"
-)
-async def requesttraining(ctx):
+@bot.slash_command(name="say", description="Repeat a message (Executive & Holding only)")
+async def say_slash(interaction: nextcord.Interaction, *, message: str):
+    if any(role.id in ALLOWED_ROLE_IDS for role in interaction.user.roles):
+        await interaction.response.send_message(message)
+    else:
+        await interaction.response.send_message(
+            f"❌ {interaction.user.mention}, you don't have permission to use this command.",
+            ephemeral=True
+        )
 
+# ------------------------------
+# REQUESTTRAINING PREFIX COMMAND
+# ------------------------------
+@bot.command(name="requesttraining")
+async def requesttraining_prefix(ctx):
     # Channel restriction
     if ctx.channel.id != 1473150653374271491:
-        if ctx.interaction:
-            await ctx.send(
-                f"❌ {ctx.author.mention}, you can't use this command here.",
-                ephemeral=True
-            )
-        else:
-            await ctx.send(f"❌ {ctx.author.mention}, you can't use this command here.")
+        await ctx.send(f"❌ {ctx.author.mention}, you can't use this command here.")
         return
 
     # Role restriction
     allowed_role_id = 1472037174630285538
     if allowed_role_id not in [role.id for role in ctx.author.roles]:
-        if ctx.interaction:
-            await ctx.send(
-                f"❌ {ctx.author.mention}, you do not have permission to use this command.",
-                ephemeral=True
-            )
-        else:
-            await ctx.send(f"❌ {ctx.author.mention}, you do not have permission to use this command.")
+        await ctx.send(f"❌ {ctx.author.mention}, you do not have permission to use this command.")
         return
 
     target_channel = bot.get_channel(1473150653374271491)
@@ -123,26 +107,50 @@ async def requesttraining(ctx):
         color=0x4bbfff
     )
 
-    await target_channel.send(
-        content="<@&1473151069264678932>",
-        embed=embed
-    )
+    await target_channel.send(content="<@&1473151069264678932>", embed=embed)
+    await ctx.send(f"✅ {ctx.author.mention}, your training request has been sent!", delete_after=5)
 
-    # Delete prefix command message
-    if ctx.interaction is None:
-        try:
-            await ctx.message.delete()
-        except nextcord.Forbidden:
-            pass
-        await ctx.send(
-            f"✅ {ctx.author.mention}, your training request has been sent!",
-            delete_after=5
-        )
-    else:
-        await ctx.send(
-            f"✅ {ctx.author.mention}, your training request has been sent!",
+# ------------------------------
+# REQUESTTRAINING SLASH COMMAND
+# ------------------------------
+@bot.slash_command(name="requesttraining", description="Request a staff training session")
+async def requesttraining_slash(interaction: nextcord.Interaction):
+    # Channel restriction
+    if interaction.channel_id != 1473150653374271491:
+        await interaction.response.send_message(
+            f"❌ {interaction.user.mention}, you can't use this command here.",
             ephemeral=True
         )
+        return
+
+    # Role restriction
+    allowed_role_id = 1472037174630285538
+    if allowed_role_id not in [role.id for role in interaction.user.roles]:
+        await interaction.response.send_message(
+            f"❌ {interaction.user.mention}, you do not have permission to use this command.",
+            ephemeral=True
+        )
+        return
+
+    target_channel = bot.get_channel(1473150653374271491)
+    if not target_channel:
+        await interaction.response.send_message("❌ Could not find the target channel.")
+        return
+
+    embed = nextcord.Embed(
+        title="Greetings, Staff Trainers",
+        description=(
+            f"{interaction.user.mention} is requesting that a training session will be hosted at this time.\n\n"
+            "You are requested to organize one and provide further instructions in <#1472056023358640282>."
+        ),
+        color=0x4bbfff
+    )
+
+    await target_channel.send(content="<@&1473151069264678932>", embed=embed)
+    await interaction.response.send_message(
+        f"✅ {interaction.user.mention}, your training request has been sent!",
+        ephemeral=True
+    )
 
 # ------------------------------
 # Keep-alive task
@@ -151,9 +159,8 @@ async def requesttraining(ctx):
 async def on_ready():
     print(f"Logged in as {bot.user}!")
 
-    # Sync slash commands
     try:
-        await bot.sync_application_commands()
+        await bot.sync_all_application_commands()
         print("Slash commands synced!")
     except Exception as e:
         print(f"Slash sync failed: {e}")
