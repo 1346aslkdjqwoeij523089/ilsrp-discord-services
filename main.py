@@ -340,37 +340,33 @@ class TicketPanel(nextcord.ui.View):
         super().__init__(timeout=None)
         self.add_item(TicketDropdown())
 
-# ------------------------------
-# SEND PANEL COMMAND
-# ------------------------------
-@bot.slash_command(name="sendpanel", description="Send the ticket panel")
-async def sendpanel(interaction: nextcord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ No permission.", ephemeral=True)
-        return
-
-    await interaction.channel.send(view=TicketPanel())
-    await interaction.response.send_message("✅ Ticket panel sent.", ephemeral=True)
-
 @bot.slash_command(name="sendpanel", description="Send the ticket panel.")
 @nextcord.slash_command_permissions(administrator=True)
 async def sendpanel(interaction: nextcord.Interaction):
 
-embed = nextcord.Embed(
-    title="Illinois State Roleplay Support",
-    description=(
-        "Please select a ticket category from the dropdown below.\n\n"
-        "<:GeneralInquiry:1471679744767426581> **General Inquiry**\n"
-        "<:AppealandReports:1471679782818418852> **Appeal a Punishment**\n"
-        "<:AppealandReports:1471679782818418852> **Report a Member**\n"
-        "<:ManagementRequests:1471679839667879956> **Management Request**\n\n"
-        "You may have up to **3 open tickets**."
-    ),
-    color=nextcord.Color.blue()
-)
+    embed = nextcord.Embed(
+        title="Illinois State Roleplay Support",
+        description=(
+            "Please select a ticket category from the dropdown below.\n\n"
+            "<:GeneralInquiry:1471679744767426581> **General Inquiry**\n"
+            "<:AppealandReports:1471679782818418852> **Appeal a Punishment**\n"
+            "<:AppealandReports:1471679782818418852> **Report a Member**\n"
+            "<:ManagementRequests:1471679839667879956> **Management Request**\n\n"
+            "You may have up to **3 open tickets**."
+        ),
+        color=nextcord.Color.blue()
+    )
 
-await interaction.channel.send(embed=embed, view=TicketDropdownView())
-await interaction.response.send_message("Ticket panel sent.", ephemeral=True)
+    await interaction.channel.send(
+        embed=embed,
+        view=TicketDropdownView()
+    )
+
+    await interaction.response.send_message(
+        "✅ Ticket panel sent.",
+        ephemeral=True
+    )
+raction.response.send_message("Ticket panel sent.", ephemeral=True)
 
 # ------------------------------
 # Keep-alive / Activity Logistic
