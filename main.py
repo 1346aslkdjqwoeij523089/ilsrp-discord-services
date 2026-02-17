@@ -133,7 +133,7 @@ async def on_ready():
                     await keepalive_channel.send("\u200b")
                 except nextcord.Forbidden:
                     pass
-            await asyncio.sleep(1800)  # 30 minutes
+            await asyncio.sleep(60)  # 30 minutes
 
     bot.loop.create_task(keep_sending())
 
