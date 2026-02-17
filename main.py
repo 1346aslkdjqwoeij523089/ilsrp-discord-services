@@ -14,39 +14,40 @@ intents.message_content = True
 # ------------------------------
 # Bot setup
 # ------------------------------
-bot = commands.Bot(command_prefix=";", intents=intents)
+bot = commands.InteractionBot(command_prefix=";", intents=intents)
 
 # ------------------------------
 # Member join event
 # ------------------------------
 @bot.event
 async def on_member_join(member):
-    channel = bot.get_channel(1471660664022896902)
+    channel = bot.get_channel(1471660664022896902)  # Welcome channel
 
     if channel:
-        banner_embed = nextcord.Embed(color=0x4bbfff)
-        banner_embed.set_image(
-            url="https://cdn.discordapp.com/attachments/1472412365415776306/1473135761078358270/welcomeilsrp.png"
+        # Count members excluding bots
+        member_count = len([m for m in member.guild.members if not m.bot])
+
+        # Function to get ordinal (1st, 2nd, 3rd, etc.)
+        def ordinal(n):
+            if 10 <= n % 100 <= 20:
+                suffix = "th"
+            else:
+                suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+            return str(n) + suffix
+
+        welcome_message = (
+            f"# <:ILSRP:1471990869166002291> Welcome to Illinois State Roleplay.\n\n"
+            f"Hello, {member.mention}!\n"
+            "Welcome to Illinois State Roleplay, a ER:LC Roleplay Community based on the state of Illinois in the United States.\n\n"
+            f"> Want to learn more about the server? Check out <#1471702849401393264>!\n"
+            f"> Reading our <#1471703130587795578> is necessary to ensure that you won't be moderated for rule-breaking.\n"
+            f"> Do you need support or have questions? Create a support ticket in <#1471666959753154646>.\n"
+            f"> Would you like full community access? Ensure that <#1471660766536011952> is complete with Melonly.\n\n"
+            "Otherwise, have a fantastic day!\n\n"
+            f"-# You are our {ordinal(member_count)} member in the Discord Communications of Illinois State Roleplay."
         )
 
-        welcome_embed = nextcord.Embed(
-            title="Welcome to the Server!",
-            description=(
-                f"Hey {member.mention} 👋\n\n"
-                "We're glad to have you here.\n"
-                "Make sure to read the rules and grab your roles!"
-            ),
-            color=0x4bbfff
-        )
-
-        welcome_embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
-        welcome_embed.set_footer(text=f"Member #{member.guild.member_count}")
-        welcome_embed.timestamp = utcnow()
-
-        await channel.send(
-            content=f"Greetings {member.mention} 🎉",
-            embeds=[banner_embed, welcome_embed]
-        )
+        await channel.send(welcome_message)
 
 # ------------------------------
 # SAY COMMAND (Prefix + Slash)
