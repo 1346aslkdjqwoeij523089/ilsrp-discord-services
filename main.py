@@ -316,10 +316,15 @@ class PromoteModal(nextcord.ui.Modal):
 `Updated Position:` {new_position}
 `Reason:` {self.reason.value}"""
         
+        # Send copy text privately to the person who ran the command
         await interaction.followup.send(
-            f"✅ **{self.target_member}** has been promoted to **{new_position}**!\n\n"
             f"**COPY TEXT:**\n```\n{copy_text}\n```",
-            ephemeral=False
+            ephemeral=True
+        )
+        
+        # Send public confirmation in the channel
+        await interaction.channel.send(
+            f"✅ **{self.target_member}** has been promoted to **{new_position}**!"
         )
         
         log_channel = interaction.guild.get_channel(LOG_CHANNEL_ID)
