@@ -36,4 +36,4 @@ async def on_member_join(member):
         embeds=[banner_embed, welcome_embed]
     )
 
-bot.run("YOUR_BOT_TOKEN")
+bot.run(BOT_TOKEN)
