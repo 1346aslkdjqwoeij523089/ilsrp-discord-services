@@ -341,8 +341,15 @@ class TicketPanel(nextcord.ui.View):
         self.add_item(TicketDropdown())
 
 @bot.slash_command(name="sendpanel", description="Send the ticket panel.")
-@nextcord.slash_command_permissions(administrator=True)
 async def sendpanel(interaction: nextcord.Interaction):
+
+    # Admin check
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "❌ You must be an administrator to use this command.",
+            ephemeral=True
+        )
+        return
 
     embed = nextcord.Embed(
         title="Illinois State Roleplay Support",
@@ -366,7 +373,7 @@ async def sendpanel(interaction: nextcord.Interaction):
         "✅ Ticket panel sent.",
         ephemeral=True
     )
-raction.response.send_message("Ticket panel sent.", ephemeral=True)
+
 
 # ------------------------------
 # Keep-alive / Activity Logistic
