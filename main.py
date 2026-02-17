@@ -2,6 +2,7 @@ import os
 import nextcord
 from nextcord.ext import commands
 from nextcord.utils import utcnow
+import asyncio
 
 # ------------------------------
 # Intents
@@ -113,6 +114,28 @@ async def requesttraining(ctx):
     except nextcord.Forbidden:
         pass
     await ctx.send(f"✅ {ctx.author.mention}, your training request has been sent!", delete_after=5)
+
+# ------------------------------
+# Keep-alive task to send a silent message every 30 mins
+# ------------------------------
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user}!")
+
+    keepalive_channel = bot.get_channel(1473152268411998410)
+    
+    async def keep_sending():
+        await bot.wait_until_ready()
+        while not bot.is_closed():
+            if keepalive_channel:
+                try:
+                    # Send invisible character to keep the bot active
+                    await keepalive_channel.send("\u200b")
+                except nextcord.Forbidden:
+                    pass
+            await asyncio.sleep(1800)  # 30 minutes
+
+    bot.loop.create_task(keep_sending())
 
 # ------------------------------
 # Run bot using Render environment variable
