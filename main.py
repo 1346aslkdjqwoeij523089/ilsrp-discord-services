@@ -8,8 +8,8 @@ import asyncio
 # Intents
 # ------------------------------
 intents = nextcord.Intents.default()
-intents.members = True  # Required to detect member joins
-intents.message_content = True  # Required for prefix commands
+intents.members = True
+intents.message_content = True
 
 # ------------------------------
 # Bot setup
@@ -21,17 +21,14 @@ bot = commands.Bot(command_prefix=";", intents=intents)
 # ------------------------------
 @bot.event
 async def on_member_join(member):
-    # Replace with your welcome channel ID
     channel = bot.get_channel(1471660664022896902)
 
     if channel:
-        # ---- EMBED 1: Banner ----
         banner_embed = nextcord.Embed(color=0x4bbfff)
         banner_embed.set_image(
             url="https://cdn.discordapp.com/attachments/1472412365415776306/1473135761078358270/welcomeilsrp.png"
         )
 
-        # ---- EMBED 2: Welcome Message ----
         welcome_embed = nextcord.Embed(
             title="Welcome to the Server!",
             description=(
@@ -42,57 +39,80 @@ async def on_member_join(member):
             color=0x4bbfff
         )
 
-        welcome_embed.set_thumbnail(url=member.avatar.url)
+        welcome_embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
         welcome_embed.set_footer(text=f"Member #{member.guild.member_count}")
-        welcome_embed.timestamp = utcnow()  # adds timestamp
+        welcome_embed.timestamp = utcnow()
 
-        # Send greeting text + embeds
         await channel.send(
             content=f"Greetings {member.mention} 🎉",
             embeds=[banner_embed, welcome_embed]
         )
 
 # ------------------------------
-# ;say command for two roles
+# SAY COMMAND (Prefix + Slash)
 # ------------------------------
-ALLOWED_ROLE_IDS = [1471642126663024640, 1471642360503992411]  # executive & holding
+ALLOWED_ROLE_IDS = [1471642126663024640, 1471642360503992411]
 
-@bot.command()
+@bot.hybrid_command(name="say", description="Repeat a message (Executive & Holding only)")
 async def say(ctx, *, message: str):
-    """Repeats message and deletes original; only for specific roles."""
-    
+
     if any(role.id in ALLOWED_ROLE_IDS for role in ctx.author.roles):
-        try:
-            await ctx.message.delete()
-        except nextcord.Forbidden:
-            pass
+
+        # Delete only if prefix command
+        if ctx.interaction is None:
+            try:
+                await ctx.message.delete()
+            except nextcord.Forbidden:
+                pass
+
         await ctx.send(message)
+
     else:
-        await ctx.send(f"❌ {ctx.author.mention}, you don't have permission to use this command.")
+        if ctx.interaction:
+            await ctx.send(
+                f"❌ {ctx.author.mention}, you don't have permission to use this command.",
+                ephemeral=True
+            )
+        else:
+            await ctx.send(f"❌ {ctx.author.mention}, you don't have permission to use this command.")
 
 # ------------------------------
-# ;requesttraining command
+# REQUEST TRAINING (Prefix + Slash)
 # ------------------------------
-@bot.command()
+@bot.hybrid_command(
+    name="requesttraining",
+    description="Request a staff training session"
+)
 async def requesttraining(ctx):
-    # Only allow usage in the specific channel
+
+    # Channel restriction
     if ctx.channel.id != 1473150653374271491:
-        await ctx.send(f"❌ {ctx.author.mention}, you can't use this command here.")
+        if ctx.interaction:
+            await ctx.send(
+                f"❌ {ctx.author.mention}, you can't use this command here.",
+                ephemeral=True
+            )
+        else:
+            await ctx.send(f"❌ {ctx.author.mention}, you can't use this command here.")
         return
 
-    # Only allow users with the specific role
+    # Role restriction
     allowed_role_id = 1472037174630285538
     if allowed_role_id not in [role.id for role in ctx.author.roles]:
-        await ctx.send(f"❌ {ctx.author.mention}, you do not have permission to use this command.")
+        if ctx.interaction:
+            await ctx.send(
+                f"❌ {ctx.author.mention}, you do not have permission to use this command.",
+                ephemeral=True
+            )
+        else:
+            await ctx.send(f"❌ {ctx.author.mention}, you do not have permission to use this command.")
         return
 
-    # Target channel to send the message
     target_channel = bot.get_channel(1473150653374271491)
     if not target_channel:
         await ctx.send("❌ Could not find the target channel.")
         return
 
-    # Embed message
     embed = nextcord.Embed(
         title="Greetings, Staff Trainers",
         description=(
@@ -102,42 +122,56 @@ async def requesttraining(ctx):
         color=0x4bbfff
     )
 
-    # Send role ping outside of embed
     await target_channel.send(
         content="<@&1473151069264678932>",
         embed=embed
     )
 
-    # Delete command message and optionally confirm
-    try:
-        await ctx.message.delete()
-    except nextcord.Forbidden:
-        pass
-    await ctx.send(f"✅ {ctx.author.mention}, your training request has been sent!", delete_after=5)
+    # Delete prefix command message
+    if ctx.interaction is None:
+        try:
+            await ctx.message.delete()
+        except nextcord.Forbidden:
+            pass
+        await ctx.send(
+            f"✅ {ctx.author.mention}, your training request has been sent!",
+            delete_after=5
+        )
+    else:
+        await ctx.send(
+            f"✅ {ctx.author.mention}, your training request has been sent!",
+            ephemeral=True
+        )
 
 # ------------------------------
-# Keep-alive task to send a silent message every 30 mins
+# Keep-alive task
 # ------------------------------
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}!")
 
+    # Sync slash commands
+    try:
+        await bot.sync_application_commands()
+        print("Slash commands synced!")
+    except Exception as e:
+        print(f"Slash sync failed: {e}")
+
     keepalive_channel = bot.get_channel(1473152268411998410)
-    
+
     async def keep_sending():
         await bot.wait_until_ready()
         while not bot.is_closed():
             if keepalive_channel:
                 try:
-                    # Send invisible character to keep the bot active
                     await keepalive_channel.send("\u200b")
                 except nextcord.Forbidden:
                     pass
-            await asyncio.sleep(60)  # 30 minutes
+            await asyncio.sleep(1800)  # 30 minutes
 
     bot.loop.create_task(keep_sending())
 
 # ------------------------------
-# Run bot using Render environment variable
+# Run bot
 # ------------------------------
 bot.run(os.getenv("TOKEN"))
