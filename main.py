@@ -845,6 +845,13 @@ SESSION_PING_ROLE_ID = 1473466540430200862
 # Staff role IDs for counting on-shift staff
 STAFF_ROLE_IDS = [1472041465365663976, 1472041617295806485]
 
+# Session message ID for auto-refresh (will be set when session starts)
+SESSION_MESSAGE_ID = None
+SESSION_MESSAGE_CHANNEL_ID = None
+
+# Session refresh interval (in seconds) - 5 minutes
+SESSION_REFRESH_INTERVAL = 300
+
 # Session image URL
 SESSION_IMAGE_URL = "https://cdn.discordapp.com/attachments/1472412365415776306/1473471108786426046/isrpsessions.png?ex=69965468&is=699502e8&hm=522484f0f1b7147b81bc287ddac36d841d815b72bd10e4f33618ebe0ff284e8a&"
 
@@ -980,11 +987,20 @@ class SessionManagementView(nextcord.ui.View):
             timestamp=utcnow()
         )
         
-        await session_channel.send(
-            content=f"<@&{SESSION_PING_ROLE_ID}>",
+        # Send message without ping (auto-refresh will update without pinging)
+        session_message = await session_channel.send(
             embeds=[image_embed, session_embed]
         )
-        await interaction.followup.send("✅ Session started message sent!", ephemeral=True)
+        
+        # Store the session message ID for auto-refresh
+        global SESSION_MESSAGE_ID, SESSION_MESSAGE_CHANNEL_ID
+        SESSION_MESSAGE_ID = session_message.id
+        SESSION_MESSAGE_CHANNEL_ID = session_channel.id
+        
+        # Start the auto-refresh background task
+        bot.loop.create_task(refresh_session_message())
+        
+        await interaction.followup.send("✅ Session started message sent! (Will auto-refresh every 5 minutes)", ephemeral=True)
     
     @nextcord.ui.button(label="Session Shutdown", style=nextcord.ButtonStyle.danger, emoji="⏹️", custom_id="session_shutdown")
     async def session_shutdown(self, button, interaction):
@@ -1001,6 +1017,11 @@ class SessionManagementView(nextcord.ui.View):
         if not session_channel:
             await interaction.followup.send("❌ Session channel not found.", ephemeral=True)
             return
+        
+        # Clear the session message ID to stop auto-refresh
+        global SESSION_MESSAGE_ID, SESSION_MESSAGE_CHANNEL_ID
+        SESSION_MESSAGE_ID = None
+        SESSION_MESSAGE_CHANNEL_ID = None
         
         embed = nextcord.Embed(
             title="🔴 Session Ended",
@@ -1198,7 +1219,6 @@ class StartSessionButton(nextcord.ui.View):
         )
         
         await session_channel.send(
-            content=f"<@&{SESSION_PING_ROLE_ID}>",
             embeds=[image_embed, session_embed]
         )
         
@@ -1218,7 +1238,15 @@ class StartSessionButton(nextcord.ui.View):
         except:
             pass
         
-        await interaction.followup.send("✅ Session started successfully!", ephemeral=True)
+        # Store the session message ID for auto-refresh
+        global SESSION_MESSAGE_ID, SESSION_MESSAGE_CHANNEL_ID
+        SESSION_MESSAGE_ID = session_message.id
+        SESSION_MESSAGE_CHANNEL_ID = session_channel.id
+        
+        # Start the auto-refresh background task
+        bot.loop.create_task(refresh_session_message())
+        
+        await interaction.followup.send("✅ Session started successfully! (Will auto-refresh every 5 minutes)", ephemeral=True)
         
         # Remove from vote tracking
         if hasattr(bot, 'session_votes') and interaction.message.id in bot.session_votes:
@@ -1315,6 +1343,50 @@ async def session_management(interaction: nextcord.Interaction):
     view = SessionManagementView()
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+
+# ------------------------------
+# Session Auto-Refresh Function
+# ------------------------------
+async def refresh_session_message():
+    """Automatically refresh the session message with updated stats every 5 minutes"""
+    while not bot.is_closed():
+        if SESSION_MESSAGE_ID and SESSION_MESSAGE_CHANNEL_ID:
+            try:
+                channel = bot.get_channel(SESSION_MESSAGE_CHANNEL_ID)
+                if channel:
+                    message = await channel.fetch_message(SESSION_MESSAGE_ID)
+                    
+                    # Get fresh stats
+                    stats = await get_erlc_stats()
+                    on_shift_count = await count_on_shift_staff(channel.guild)
+                    
+                    players_in_game = stats['players'] if stats else 0
+                    max_players = stats['max_players'] if stats else 40
+                    queue_count = stats['queue'] if stats else 0
+                    
+                    # Create updated embed (keep image embed as first embed)
+                    image_embed = nextcord.Embed(color=BLUE)
+                    image_embed.set_image(url=SESSION_IMAGE_URL)
+                    
+                    session_embed = nextcord.Embed(
+                        title="__ILSRP・Session Started__",
+                        description=(
+                            "Hello, Illinois State Roleplay Public Members.\n"
+                            "> After enough votes with the <:Checkmark:1473460905634431109> reaction, the session has officially started. Below outline some statistics to refer to.\n\n"
+                            f"> - In-Game Session Code: ```ILRPS```\n"
+                            f"> - In-Game: ```{players_in_game}/{max_players}```\n"
+                            f"> - In-Queue: ```{queue_count}/{max_players}```\n"
+                            f"> - On-Shift: ```{on_shift_count}```"
+                        ),
+                        color=BLUE,
+                        timestamp=utcnow()
+                    )
+                    
+                    await message.edit(embeds=[image_embed, session_embed])
+            except Exception as e:
+                print(f"Error refreshing session message: {e}")
+        
+        await asyncio.sleep(SESSION_REFRESH_INTERVAL)
 
 # ------------------------------
 # Keep-alive / Activity Logistic
