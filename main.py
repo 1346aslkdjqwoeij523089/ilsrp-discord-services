@@ -1339,8 +1339,12 @@ class SessionManagementView(nextcord.ui.View):
             )
             return
         
-        # Check if session is NOT active (can't shutdown if no session)
-        if not hasattr(bot, 'session_message_id') or bot.session_message_id is None:
+        # Check if there's an active session OR an active vote
+        has_session = hasattr(bot, 'session_message_id') and bot.session_message_id is not None
+        has_vote = hasattr(bot, 'session_votes') and len(bot.session_votes) > 0
+        
+        # Allow shutdown if there's either a session OR a vote
+        if not has_session and not has_vote:
             await interaction.response.send_message(
                 "Unable to use this session option. Please select a different one.",
                 ephemeral=True
@@ -1357,6 +1361,10 @@ class SessionManagementView(nextcord.ui.View):
         # Clear the session message ID to stop auto-refresh
         bot.session_message_id = None
         bot.session_message_channel_id = None
+        
+        # Clear any active votes
+        if hasattr(bot, 'session_votes'):
+            bot.session_votes = {}
         
         # Delete all messages in the session channel except the pinned message
         try:
