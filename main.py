@@ -834,10 +834,19 @@ MANAGEMENT_ROLE_IDS = [
 ]
 
 # Session channel ID where session messages are sent
-SESSION_CHANNEL_ID = 1473150653374271491  # You'll need to update this to your actual session channel
+SESSION_CHANNEL_ID = 1471702676591874078
+
+# The pinned message ID that should never be deleted
+SESSION_PINNED_MESSAGE_ID = 1473473459312136426
 
 # Session ping role ID
 SESSION_PING_ROLE_ID = 1473466540430200862
+
+# Staff role IDs for counting on-shift staff
+STAFF_ROLE_IDS = [1472041465365663976, 1472041617295806485]
+
+# Session image URL
+SESSION_IMAGE_URL = "https://cdn.discordapp.com/attachments/1472412365415776306/1473471108786426046/isrpsessions.png?ex=69965468&is=699502e8&hm=522484f0f1b7147b81bc287ddac36d841d815b72bd10e4f33618ebe0ff284e8a&"
 
 # Checkmark emoji for voting
 CHECKMARK_EMOJI = "<:Checkmark:1473460905634431109>"
@@ -882,6 +891,15 @@ async def get_erlc_stats():
         print(f"ERLC API Error: {e}")
     return None
 
+async def count_on_shift_staff(guild):
+    """Count members with on-shift staff roles"""
+    count = 0
+    for role_id in STAFF_ROLE_IDS:
+        role = guild.get_role(role_id)
+        if role:
+            count += len(role.members)
+    return count
+
 class SessionManagementView(nextcord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -920,24 +938,51 @@ class SessionManagementView(nextcord.ui.View):
             await interaction.followup.send("❌ Session channel not found.", ephemeral=True)
             return
         
+        # Delete all messages in the session channel except the pinned message
+        try:
+            async for message in session_channel.history(limit=100):
+                if message.id != SESSION_PINNED_MESSAGE_ID:
+                    try:
+                        await message.delete()
+                    except:
+                        pass
+        except:
+            pass
+        
         # Get ERLC stats
         stats = await get_erlc_stats()
         
-        embed = nextcord.Embed(
-            title="🎮 Session Started",
-            description=f"**{interaction.user.mention}** has started a session!",
+        # Count on-shift staff
+        on_shift_count = await count_on_shift_staff(interaction.guild)
+        
+        # Get player and queue info from stats
+        players_in_game = stats['players'] if stats else 0
+        max_players = stats['max_players'] if stats else 40
+        queue_count = stats['queue'] if stats else 0
+        
+        # Create session start embeds
+        # Embed 1 - Image
+        image_embed = nextcord.Embed(color=BLUE)
+        image_embed.set_image(url=SESSION_IMAGE_URL)
+        
+        # Embed 2 - Session info
+        session_embed = nextcord.Embed(
+            title="__ILSRP・Session Started__",
+            description=(
+                "Hello, Illinois State Roleplay Public Members.\n"
+                "> After enough votes with the <:Checkmark:1473460905634431109> reaction, the session has officially started. Below outline some statistics to refer to.\n\n"
+                f"> - In-Game Session Code: ```ILRPS```\n"
+                f"> - In-Game: ```{players_in_game}/{max_players}```\n"
+                f"> - In-Queue: ```{queue_count}/{max_players}```\n"
+                f"> - On-Shift: ```{on_shift_count}```"
+            ),
             color=BLUE,
             timestamp=utcnow()
         )
         
-        if stats:
-            embed.add_field(name="👥 Players In-Game", value=f"{stats['players']}/{stats['max_players']}", inline=True)
-            embed.add_field(name="👮 Staff In-Game", value=str(stats['staff']), inline=True)
-            embed.add_field(name="📋 Queue", value=str(stats['queue']), inline=True)
-        
         await session_channel.send(
             content=f"<@&{SESSION_PING_ROLE_ID}>",
-            embed=embed
+            embeds=[image_embed, session_embed]
         )
         await interaction.followup.send("✅ Session started message sent!", ephemeral=True)
     
@@ -1061,7 +1106,7 @@ class SessionVoteModal(nextcord.ui.Modal):
         
         vote_message = await session_channel.send(
             content=f"<@&{SESSION_PING_ROLE_ID}>",
-            embed=embed
+            embeds=[image_embed, embed]
         )
         
         # Add checkmark reaction
@@ -1110,24 +1155,51 @@ class StartSessionButton(nextcord.ui.View):
             await interaction.followup.send("❌ Session channel not found.", ephemeral=True)
             return
         
+        # Delete all messages in the session channel except the pinned message
+        try:
+            async for message in session_channel.history(limit=100):
+                if message.id != SESSION_PINNED_MESSAGE_ID:
+                    try:
+                        await message.delete()
+                    except:
+                        pass
+        except:
+            pass
+        
         # Get ERLC stats
         stats = await get_erlc_stats()
         
-        embed = nextcord.Embed(
-            title="🎮 Session Started",
-            description=f"**{interaction.user.mention}** has started a session!",
+        # Count on-shift staff
+        on_shift_count = await count_on_shift_staff(interaction.guild)
+        
+        # Get player and queue info from stats
+        players_in_game = stats['players'] if stats else 0
+        max_players = stats['max_players'] if stats else 40
+        queue_count = stats['queue'] if stats else 0
+        
+        # Create session start embeds
+        # Embed 1 - Image
+        image_embed = nextcord.Embed(color=BLUE)
+        image_embed.set_image(url=SESSION_IMAGE_URL)
+        
+        # Embed 2 - Session info
+        session_embed = nextcord.Embed(
+            title="__ILSRP・Session Started__",
+            description=(
+                "Hello, Illinois State Roleplay Public Members.\n"
+                "> After enough votes with the <:Checkmark:1473460905634431109> reaction, the session has officially started. Below outline some statistics to refer to.\n\n"
+                f"> - In-Game Session Code: ```ILRPS```\n"
+                f"> - In-Game: ```{players_in_game}/{max_players}```\n"
+                f"> - In-Queue: ```{queue_count}/{max_players}```\n"
+                f"> - On-Shift: ```{on_shift_count}```"
+            ),
             color=BLUE,
             timestamp=utcnow()
         )
         
-        if stats:
-            embed.add_field(name="👥 Players In-Game", value=f"{stats['players']}/{stats['max_players']}", inline=True)
-            embed.add_field(name="👮 Staff In-Game", value=str(stats['staff']), inline=True)
-            embed.add_field(name="📋 Queue", value=str(stats['queue']), inline=True)
-        
         await session_channel.send(
             content=f"<@&{SESSION_PING_ROLE_ID}>",
-            embed=embed
+            embeds=[image_embed, session_embed]
         )
         
         # Update the original vote message
@@ -1217,7 +1289,7 @@ async def on_raw_reaction_add(payload):
     else:
         await message.edit(embed=embed)
 
-@bot.slash_command(name="sessionmanagement", description="Manage server sessions")
+@bot.slash_command(name="sessions", description="Manage server sessions")
 async def session_management(interaction: nextcord.Interaction):
     """Send the session management panel"""
     if not has_management_role(interaction.user):
@@ -1258,6 +1330,17 @@ async def on_ready():
 
     bot.add_view(TicketPanel())
     bot.add_view(SessionManagementView())
+
+    # Send deployment notification message once on startup
+    log_channel = bot.get_channel(LOG_CHANNEL_ID)
+    if log_channel:
+        deployment_embed = nextcord.Embed(
+            title="New Deployment",
+            description="# New deployment has occured. Please refresh your client to see the changes, by exploring commands, embeds, and more!",
+            color=0x4bbfff,
+            timestamp=utcnow()
+        )
+        await log_channel.send(embed=deployment_embed)
 
     keepalive_channel = bot.get_channel(1473152268411998410)
 
