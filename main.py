@@ -681,9 +681,10 @@ async def unlock_channel(ctx):
     await log_command(ctx.author, "unlock", "Prefix")
     
     channel = ctx.channel
+    channel_id = channel.id
     
     # Check if channel is locked
-    if channel.id not in locked_channels:
+    if channel_id not in locked_channels:
         # Delete user's command message
         try:
             await ctx.message.delete()
@@ -692,18 +693,20 @@ async def unlock_channel(ctx):
         await ctx.send(f"❌ {ctx.author.mention}, this channel is not locked!")
         return
     
-    # Restore original permissions for ALL roles (FULL PermissionOverwrite)
-    original_overwrites = locked_channels[channel.id]
+    # Get the original overwrites and remove from locked list FIRST
+    original_overwrites = locked_channels[channel_id]
+    del locked_channels[channel_id]
     
+    # Now try to restore permissions
     for target_id, original_overwrite in original_overwrites.items():
         # Get the role by ID
         role = ctx.guild.get_role(target_id)
         if role:
             # Restore the FULL original PermissionOverwrite
-            await channel.set_permissions(role, overwrite=original_overwrite)
-    
-    # Remove from locked channels
-    del locked_channels[channel.id]
+            try:
+                await channel.set_permissions(role, overwrite=original_overwrite)
+            except Exception as e:
+                print(f"Error restoring permission for role {target_id}: {e}")
     
     # Delete user's command message
     try:
@@ -812,26 +815,30 @@ async def unlock_slash(interaction: nextcord.Interaction):
     await log_command(interaction.user, "unlock", "Slash")
     
     channel = interaction.channel
+    channel_id = channel.id
     
     # Check if channel is locked
-    if channel.id not in locked_channels:
+    if channel_id not in locked_channels:
         await interaction.response.send_message(
             "❌ This channel is not locked!",
             ephemeral=True
         )
         return
     
-    # Restore original permissions for ALL roles (FULL PermissionOverwrite)
-    original_overwrites = locked_channels[channel.id]
+    # Get the original overwrites and remove from locked list FIRST
+    original_overwrites = locked_channels[channel_id]
+    del locked_channels[channel_id]
     
+    # Now try to restore permissions
     for target_id, original_overwrite in original_overwrites.items():
         # Get the role by ID
         role = interaction.guild.get_role(target_id)
         if role:
             # Restore the FULL original PermissionOverwrite
-            await channel.set_permissions(role, overwrite=original_overwrite)
-    
-    del locked_channels[channel.id]
+            try:
+                await channel.set_permissions(role, overwrite=original_overwrite)
+            except Exception as e:
+                print(f"Error restoring permission for role {target_id}: {e}")
     
     embed = nextcord.Embed(
         description=f"🔓 Channel has been unlocked.",
