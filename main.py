@@ -936,7 +936,7 @@ class SessionManagementView(nextcord.ui.View):
         modal = SessionVoteModal()
         await interaction.response.send_modal(modal)
     
-    @nextcord.ui.button(label="Session Start", style=nextcord.ButtonStyle.success, emoji="▶️", custom_id="session_start")
+    @nextcord.ui.button(label="Session Start", style=nextcord.ButtonStyle.primary, emoji="▶️", custom_id="session_start")
     async def session_start(self, button, interaction):
         if not has_management_role(interaction.user):
             await interaction.response.send_message(
@@ -1016,7 +1016,7 @@ class SessionManagementView(nextcord.ui.View):
         
         await interaction.followup.send("✅ Session started message sent! (Will auto-refresh every 5 minutes)", ephemeral=True)
     
-    @nextcord.ui.button(label="Session Shutdown", style=nextcord.ButtonStyle.danger, emoji="⏹️", custom_id="session_shutdown")
+    @nextcord.ui.button(label="Session Shutdown", style=nextcord.ButtonStyle.primary, emoji="⏹️", custom_id="session_shutdown")
     async def session_shutdown(self, button, interaction):
         if not has_management_role(interaction.user):
             await interaction.response.send_message(
@@ -1066,7 +1066,7 @@ class SessionManagementView(nextcord.ui.View):
         await session_channel.send(embed=embed)
         await interaction.followup.send("✅ Session shutdown message sent!", ephemeral=True)
     
-    @nextcord.ui.button(label="Session Low", style=nextcord.ButtonStyle.secondary, emoji="📢", custom_id="session_low")
+    @nextcord.ui.button(label="Session Low", style=nextcord.ButtonStyle.primary, emoji="📢", custom_id="session_low")
     async def session_low(self, button, interaction):
         if not has_management_role(interaction.user):
             await interaction.response.send_message(
@@ -1103,7 +1103,7 @@ class SessionManagementView(nextcord.ui.View):
         )
         await interaction.followup.send("✅ Session low ping sent!", ephemeral=True)
     
-    @nextcord.ui.button(label="Session Full", style=nextcord.ButtonStyle.secondary, emoji="✅", custom_id="session_full")
+    @nextcord.ui.button(label="Session Full", style=nextcord.ButtonStyle.primary, emoji="✅", custom_id="session_full")
     async def session_full(self, button, interaction):
         if not has_management_role(interaction.user):
             await interaction.response.send_message(
@@ -1224,7 +1224,7 @@ class StartSessionButton(nextcord.ui.View):
         super().__init__(timeout=None)
         self.initiator_id = initiator_id
     
-    @nextcord.ui.button(label="Start Session", style=nextcord.ButtonStyle.success, emoji="▶️", custom_id="start_session_btn")
+    @nextcord.ui.button(label="Start Session", style=nextcord.ButtonStyle.primary, emoji="▶️", custom_id="start_session_btn")
     async def start_session(self, button, interaction):
         if interaction.user.id != self.initiator_id:
             await interaction.response.send_message(
