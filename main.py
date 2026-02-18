@@ -532,6 +532,155 @@ async def say_prefix(ctx, *, message: str):
     else:
         await ctx.send(f"❌ {ctx.author.mention}, you don't have permission to use this command.")
 
+# =========================================================
+# ====================== LOCK SYSTEM ======================
+# =========================================================
+
+# Dictionary to store original channel permissions
+# Format: {channel_id: {role_id: PermissionOverwrite}}
+locked_channels = {}
+
+# Roles to lock (configurable)
+LOCK_ROLES = [
+    1471642360503992411,  # Holding
+    1471642126663024640,  # Executive
+    1471641915215843559,  # Management
+    1471641790112333867,  # Supervision
+    1472072792081170682,  # Evaluation
+    1471640542231396373,  # Administration
+    1471640225015922982,  # Moderation
+]
+
+def has_associate_executive_or_higher(member):
+    """Check if member has Associate Executive or higher rank"""
+    member_role_ids = [role.id for role in member.roles]
+    # Associate Executive and above
+    associate_executive_rank = 1471642323657031754
+    # Also allow Owner/Co-Owner
+    if ROLE_IDS["owner"] in member_role_ids or ROLE_IDS["co_owner"] in member_role_ids:
+        return True
+    # Check for Associate Executive or higher
+    return associate_executive_rank in member_role_ids
+
+def has_executive_or_higher(member):
+    """Check if member has Executive or higher rank"""
+    member_role_ids = [role.id for role in member.roles]
+    # Executive rank and above
+    executive_rank = 1471642126663024640
+    # Also allow Owner/Co-Owner
+    if ROLE_IDS["owner"] in member_role_ids or ROLE_IDS["co_owner"] in member_role_ids:
+        return True
+    return executive_rank in member_role_ids
+
+@bot.command(name="lock")
+async def lock_channel(ctx):
+    """Lock the channel to prevent specified roles from sending messages"""
+    
+    # Check permission (Associate Executive+)
+    if not has_associate_executive_or_higher(ctx.author):
+        await ctx.send(f"❌ {ctx.author.mention}, you must be Associate Executive or higher to use this command.")
+        return
+    
+    channel = ctx.channel
+    
+    # Check if already locked
+    if channel.id in locked_channels:
+        await ctx.send(f"❌ {ctx.author.mention}, this channel is already locked!")
+        return
+    
+    # Store original permissions
+    original_overwrites = {}
+    for target, overwrite in channel.overwrites.items():
+        original_overwrites[target.id] = {
+            'allow': overwrite.pair()[0].value if overwrite.pair()[0] else 0,
+            'deny': overwrite.pair()[1].value if overwrite.pair()[1] else 0
+        }
+    
+    locked_channels[channel.id] = original_overwrites
+    
+    # Apply lock - deny send_messages for the configured roles
+    for role_id in LOCK_ROLES:
+        role = ctx.guild.get_role(role_id)
+        if role:
+            # Get current overwrite if exists
+            current_overwrite = channel.overwrites_for(role)
+            
+            # Save current send_messages state before changing
+            if channel.id not in locked_channels:
+                locked_channels[channel.id] = {}
+            
+            # Store the original send_messages permission
+            if role.id not in locked_channels[channel.id]:
+                locked_channels[channel.id][role.id] = {}
+            
+            locked_channels[channel.id][role.id]['send_messages'] = current_overwrite.send_messages
+            
+            # Apply new permission - deny send_messages
+            await channel.set_permissions(
+                role,
+                send_messages=False,
+                read_messages=None  # Keep existing read permission
+            )
+    
+    # Also lock the @everyone role
+    everyone_role = ctx.guild.default_role
+    current_everyone = channel.overwrites_for(everyone_role)
+    if channel.id not in locked_channels:
+        locked_channels[channel.id] = {}
+    locked_channels[channel.id]['everyone'] = {}
+    locked_channels[channel.id]['everyone']['send_messages'] = current_everyone.send_messages
+    
+    await channel.set_permissions(
+        everyone_role,
+        send_messages=False,
+        read_messages=None
+    )
+    
+    await ctx.send(f"🔒 {ctx.author.mention} has locked this channel!")
+
+@bot.command(name="unlock")
+async def unlock_channel(ctx):
+    """Unlock the channel and restore original permissions"""
+    
+    # Check permission (Executive+ only)
+    if not has_executive_or_higher(ctx.author):
+        await ctx.send(f"❌ {ctx.author.mention}, you must be Executive or higher to use this command.")
+        return
+    
+    channel = ctx.channel
+    
+    # Check if channel is locked
+    if channel.id not in locked_channels:
+        await ctx.send(f"❌ {ctx.author.mention}, this channel is not locked!")
+        return
+    
+    # Restore original permissions for each role
+    original_overwrites = locked_channels[channel.id]
+    
+    for target_id, perms in original_overwrites.items():
+        if target_id == 'everyone':
+            # Restore @everyone role
+            everyone_role = ctx.guild.default_role
+            send_messages = perms.get('send_messages', None)
+            await channel.set_permissions(
+                everyone_role,
+                send_messages=send_messages
+            )
+        else:
+            # Restore role
+            role = ctx.guild.get_role(target_id)
+            if role:
+                send_messages = perms.get('send_messages', None)
+                await channel.set_permissions(
+                    role,
+                    send_messages=send_messages
+                )
+    
+    # Remove from locked channels
+    del locked_channels[channel.id]
+    
+    await ctx.send(f"🔓 {ctx.author.mention} has unlocked this channel!")
+
 # ------------------------------
 # SAY SLASH COMMAND
 # ------------------------------
