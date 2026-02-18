@@ -32,6 +32,7 @@ threading.Thread(target=run_web).start()
 intents = nextcord.Intents.default()
 intents.members = True
 intents.message_content = True
+intents.reactions = True
 
 # ------------------------------
 # Bot setup
@@ -1529,11 +1530,13 @@ class SessionVoteModal(nextcord.ui.Modal):
         
         bot.session_votes[vote_message.id] = {
             "required": required_votes,
-            "current": 0,
             "initiator": interaction.user.id,
             "channel_id": session_channel.id,
             "message_id": vote_message.id
         }
+        
+        # Start the vote auto-refresh background task
+        bot.loop.create_task(refresh_vote_messages())
         
         await interaction.followup.send(
             f"✅ Session vote started! Required votes: **{required_votes}**\n"
@@ -1711,16 +1714,20 @@ async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
         return
     
-    # Get user
-    user = channel.guild.get_member(payload.user_id)
-    if not user:
-        return
-    
-    # Get vote info
+    # Count the actual number of reactions (excluding bot's own reaction)
     vote_info = bot.session_votes[payload.message_id]
-    vote_info["current"] += 1
-    current_votes = vote_info["current"]
     required_votes = vote_info["required"]
+    
+    # Get all reactions on the message and count checkmark reactions
+    current_votes = 0
+    for reaction in message.reactions:
+        # Check if this is the checkmark reaction (either custom or unicode)
+        if str(reaction.emoji) == CHECKMARK_EMOJI or str(reaction.emoji) == "✅":
+            # Count non-bot users who reacted
+            async for user in reaction.users():
+                if user.id != bot.user.id:
+                    current_votes += 1
+            break
     
     # Update embed with new vote count
     initiator = channel.guild.get_member(vote_info["initiator"])
@@ -1735,6 +1742,84 @@ async def on_raw_reaction_add(payload):
     image_embed.set_image(url=SESSION_IMAGE_URL)
     
     # Check if vote threshold reached
+    if current_votes >= required_votes:
+        # Add Start Session button
+        view = StartSessionButton(vote_info["initiator"])
+        
+        # Text embed - Vote passed
+        text_embed = nextcord.Embed(
+            title="__ILSRP・Session Voting__",
+            description=f"> A Session Vote has been conducted by the Management Team+. React with {CHECKMARK_EMOJI} in order to vote. Once **{required_votes}** votes have been reacted, a session will begin! Thanks for voting and remain patient.\n\n✅ **{current_votes}/{required_votes}** votes reached!\n\nClick below to start the session:",
+            color=0x00FF00,
+            timestamp=utcnow()
+        )
+        
+        # Ping the initiator when threshold is reached
+        await channel.send(content=f"{initiator_mention}")
+        await message.edit(embeds=[image_embed, text_embed], view=view)
+    else:
+        # Text embed - Vote in progress
+        text_embed = nextcord.Embed(
+            title="__ILSRP・Session Voting__",
+            description=f"> A Session Vote has been conducted by the Management Team+. React with {CHECKMARK_EMOJI} in order to vote. Once **{required_votes}** votes have been reacted, a session will begin! Thanks for voting and remain patient.\n\n**Votes: {current_votes}/{required_votes}**",
+            color=SKY_BLUE,
+            timestamp=utcnow()
+        )
+        
+        await message.edit(embeds=[image_embed, text_embed])
+
+@bot.event
+async def on_raw_reaction_remove(payload):
+    """Handle vote reaction removal"""
+    if not hasattr(bot, 'session_votes'):
+        return
+    
+    if payload.message_id not in bot.session_votes:
+        return
+    
+    # Get the message
+    channel = bot.get_channel(payload.channel_id)
+    if not channel:
+        return
+    
+    try:
+        message = await channel.fetch_message(payload.message_id)
+    except:
+        return
+    
+    # Check if reaction is the checkmark
+    emoji_str = str(payload.emoji)
+    if CHECKMARK_EMOJI not in emoji_str and "✅" not in emoji_str:
+        return
+    
+    # Count the actual number of reactions (excluding bot's own reaction)
+    vote_info = bot.session_votes[payload.message_id]
+    required_votes = vote_info["required"]
+    
+    # Get all reactions on the message and count checkmark reactions
+    current_votes = 0
+    for reaction in message.reactions:
+        # Check if this is the checkmark reaction (either custom or unicode)
+        if str(reaction.emoji) == CHECKMARK_EMOJI or str(reaction.emoji) == "✅":
+            # Count non-bot users who reacted
+            async for user in reaction.users():
+                if user.id != bot.user.id:
+                    current_votes += 1
+            break
+    
+    # Update embed with new vote count
+    initiator = channel.guild.get_member(vote_info["initiator"])
+    initiator_mention = initiator.mention if initiator else "Unknown"
+    
+    # Sky blue color
+    SKY_BLUE = 0x87CEEB
+    
+    # Create TWO embeds
+    # Embed 1 - Image with sky blue sidebar
+    image_embed = nextcord.Embed(color=SKY_BLUE)
+    image_embed.set_image(url=SESSION_IMAGE_URL)
+    
+    # Check if vote threshold reached (shouldn't happen on remove, but check anyway)
     if current_votes >= required_votes:
         # Add Start Session button
         view = StartSessionButton(vote_info["initiator"])
@@ -1833,6 +1918,65 @@ async def refresh_session_message():
         await asyncio.sleep(SESSION_REFRESH_INTERVAL)
 
 # ------------------------------
+# Vote Auto-Refresh Function (Every Minute)
+# ------------------------------
+async def refresh_vote_messages():
+    """Automatically refresh vote messages every minute to show updated vote counts"""
+    while not bot.is_closed():
+        if hasattr(bot, 'session_votes') and bot.session_votes:
+            for message_id, vote_info in list(bot.session_votes.items()):
+                try:
+                    channel = bot.get_channel(vote_info["channel_id"])
+                    if not channel:
+                        continue
+                    
+                    message = await channel.fetch_message(message_id)
+                    
+                    # Count actual reactions
+                    required_votes = vote_info["required"]
+                    current_votes = 0
+                    
+                    for reaction in message.reactions:
+                        if str(reaction.emoji) == CHECKMARK_EMOJI or str(reaction.emoji) == "✅":
+                            async for user in reaction.users():
+                                if user.id != bot.user.id:
+                                    current_votes += 1
+                            break
+                    
+                    # Get initiator info
+                    initiator = channel.guild.get_member(vote_info["initiator"])
+                    initiator_mention = initiator.mention if initiator else "Unknown"
+                    
+                    SKY_BLUE = 0x87CEEB
+                    
+                    # Create embeds
+                    image_embed = nextcord.Embed(color=SKY_BLUE)
+                    image_embed.set_image(url=SESSION_IMAGE_URL)
+                    
+                    if current_votes >= required_votes:
+                        view = StartSessionButton(vote_info["initiator"])
+                        text_embed = nextcord.Embed(
+                            title="__ILSRP・Session Voting__",
+                            description=f"> A Session Vote has been conducted by the Management Team+. React with {CHECKMARK_EMOJI} in order to vote. Once **{required_votes}** votes have been reacted, a session will begin! Thanks for voting and remain patient.\n\n✅ **{current_votes}/{required_votes}** votes reached!\n\nClick below to start the session:",
+                            color=0x00FF00,
+                            timestamp=utcnow()
+                        )
+                        await message.edit(embeds=[image_embed, text_embed], view=view)
+                    else:
+                        text_embed = nextcord.Embed(
+                            title="__ILSRP・Session Voting__",
+                            description=f"> A Session Vote has been conducted by the Management Team+. React with {CHECKMARK_EMOJI} in order to vote. Once **{required_votes}** votes have been reacted, a session will begin! Thanks for voting and remain patient.\n\n**Votes: {current_votes}/{required_votes}**",
+                            color=SKY_BLUE,
+                            timestamp=utcnow()
+                        )
+                        await message.edit(embeds=[image_embed, text_embed])
+                        
+                except Exception as e:
+                    print(f"Error refreshing vote message: {e}")
+        
+        await asyncio.sleep(60)  # Refresh every minute
+
+# ------------------------------
 # Keep-alive / Activity Logistic
 # ------------------------------
 @bot.event
@@ -1846,7 +1990,10 @@ async def on_ready():
 
     bot.add_view(TicketPanel())
     bot.add_view(SessionManagementView())
-
+    
+    # Start the vote auto-refresh task
+    bot.loop.create_task(refresh_vote_messages())
+    
     # Send deployment notification message once on startup
     log_channel = bot.get_channel(LOG_CHANNEL_ID)
     if log_channel:
