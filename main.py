@@ -562,41 +562,48 @@ def has_associate_executive_or_higher(member):
     # Check for Associate Executive or higher
     return associate_executive_rank in member_role_ids
 
-def has_executive_or_higher(member):
-    """Check if member has Executive or higher rank"""
+def has_executive_or_holding(member):
+    """Check if member has Executive or Holding role (or Owner/Co-Owner)"""
     member_role_ids = [role.id for role in member.roles]
-    # Executive rank and above
-    executive_rank = 1471642126663024640
-    # Also allow Owner/Co-Owner
-    if ROLE_IDS["owner"] in member_role_ids or ROLE_IDS["co_owner"] in member_role_ids:
-        return True
-    return executive_rank in member_role_ids
+    # Executive, Holding, Owner, Co-Owner
+    allowed_roles = [
+        1471642126663024640,  # Executive
+        1471642360503992411,  # Holding
+        1471642523821674618,  # Owner
+        1471642550271082690,  # Co-Owner
+    ]
+    return any(rid in member_role_ids for rid in allowed_roles)
 
 @bot.command(name="lock")
 async def lock_channel(ctx):
     """Lock the channel to prevent specified roles from sending messages"""
     
-    # Check permission (Associate Executive+)
-    if not has_associate_executive_or_higher(ctx.author):
-        await ctx.send(f"❌ {ctx.author.mention}, you must be Associate Executive or higher to use this command.")
+    # Check permission (Executive+ or Holding)
+    if not has_executive_or_holding(ctx.author):
+        # Delete user's command message
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+        # Send error message and delete it after 5 seconds
+        error_msg = await ctx.send("You are unable to use this command, as it is restricted to Executive+.")
+        await error_msg.delete(delay=5)
         return
     
     channel = ctx.channel
     
     # Check if already locked
     if channel.id in locked_channels:
+        # Delete user's command message
+        try:
+            await ctx.message.delete()
+        except:
+            pass
         await ctx.send(f"❌ {ctx.author.mention}, this channel is already locked!")
         return
     
-    # Store original permissions
-    original_overwrites = {}
-    for target, overwrite in channel.overwrites.items():
-        original_overwrites[target.id] = {
-            'allow': overwrite.pair()[0].value if overwrite.pair()[0] else 0,
-            'deny': overwrite.pair()[1].value if overwrite.pair()[1] else 0
-        }
-    
-    locked_channels[channel.id] = original_overwrites
+    # Store original permissions - only store send_messages for relevant roles
+    locked_channels[channel.id] = {}
     
     # Apply lock - deny send_messages for the configured roles
     for role_id in LOCK_ROLES:
@@ -605,15 +612,10 @@ async def lock_channel(ctx):
             # Get current overwrite if exists
             current_overwrite = channel.overwrites_for(role)
             
-            # Save current send_messages state before changing
-            if channel.id not in locked_channels:
-                locked_channels[channel.id] = {}
-            
             # Store the original send_messages permission
-            if role.id not in locked_channels[channel.id]:
-                locked_channels[channel.id][role.id] = {}
-            
-            locked_channels[channel.id][role.id]['send_messages'] = current_overwrite.send_messages
+            locked_channels[channel.id][role.id] = {
+                'send_messages': current_overwrite.send_messages
+            }
             
             # Apply new permission - deny send_messages
             await channel.set_permissions(
@@ -625,10 +627,9 @@ async def lock_channel(ctx):
     # Also lock the @everyone role
     everyone_role = ctx.guild.default_role
     current_everyone = channel.overwrites_for(everyone_role)
-    if channel.id not in locked_channels:
-        locked_channels[channel.id] = {}
-    locked_channels[channel.id]['everyone'] = {}
-    locked_channels[channel.id]['everyone']['send_messages'] = current_everyone.send_messages
+    locked_channels[channel.id]['everyone'] = {
+        'send_messages': current_everyone.send_messages
+    }
     
     await channel.set_permissions(
         everyone_role,
@@ -636,21 +637,44 @@ async def lock_channel(ctx):
         read_messages=None
     )
     
-    await ctx.send(f"🔒 {ctx.author.mention} has locked this channel!")
+    # Delete user's command message
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+    
+    # Send lock confirmation embed
+    embed = nextcord.Embed(
+        description=f"🔒 Channel locked by {ctx.author.mention}",
+        color=BLUE
+    )
+    await ctx.send(embed=embed)
 
 @bot.command(name="unlock")
 async def unlock_channel(ctx):
     """Unlock the channel and restore original permissions"""
     
-    # Check permission (Executive+ only)
-    if not has_executive_or_higher(ctx.author):
-        await ctx.send(f"❌ {ctx.author.mention}, you must be Executive or higher to use this command.")
+    # Check permission (Executive+ or Holding)
+    if not has_executive_or_holding(ctx.author):
+        # Delete user's command message
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+        # Send error message and delete it after 5 seconds
+        error_msg = await ctx.send("You are unable to use this command, as it is restricted to Executive+.")
+        await error_msg.delete(delay=5)
         return
     
     channel = ctx.channel
     
     # Check if channel is locked
     if channel.id not in locked_channels:
+        # Delete user's command message
+        try:
+            await ctx.message.delete()
+        except:
+            pass
         await ctx.send(f"❌ {ctx.author.mention}, this channel is not locked!")
         return
     
@@ -674,12 +698,135 @@ async def unlock_channel(ctx):
                 await channel.set_permissions(
                     role,
                     send_messages=send_messages
-                )
+)
     
     # Remove from locked channels
     del locked_channels[channel.id]
     
-    await ctx.send(f"🔓 {ctx.author.mention} has unlocked this channel!")
+    # Delete user's command message
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+    
+    # Send unlock confirmation embed
+    embed = nextcord.Embed(
+        description=f"🔓 Channel has been unlocked.",
+        color=BLUE
+    )
+    await ctx.send(embed=embed)
+
+# =========================================================
+# LOCK/UNLOCK SLASH COMMANDS
+# =========================================================
+
+@bot.slash_command(name="lock", description="Lock the channel")
+async def lock_slash(interaction: nextcord.Interaction):
+    """Lock the channel to prevent specified roles from sending messages"""
+    
+    # Check permission (Executive+ or Holding)
+    if not has_executive_or_holding(interaction.user):
+        await interaction.response.send_message(
+            "You are unable to use this command, as it is restricted to Executive+.",
+            ephemeral=True
+        )
+        return
+    
+    channel = interaction.channel
+    
+    # Check if already locked
+    if channel.id in locked_channels:
+        await interaction.response.send_message(
+            "❌ This channel is already locked!",
+            ephemeral=True
+        )
+        return
+    
+    # Store original permissions - only store send_messages for relevant roles
+    locked_channels[channel.id] = {}
+    
+    # Apply lock - deny send_messages for the configured roles
+    for role_id in LOCK_ROLES:
+        role = interaction.guild.get_role(role_id)
+        if role:
+            current_overwrite = channel.overwrites_for(role)
+            locked_channels[channel.id][role_id] = {
+                'send_messages': current_overwrite.send_messages
+            }
+            await channel.set_permissions(
+                role,
+                send_messages=False,
+                read_messages=None
+            )
+    
+    # Also lock the @everyone role
+    everyone_role = interaction.guild.default_role
+    current_everyone = channel.overwrites_for(everyone_role)
+    locked_channels[channel.id]['everyone'] = {
+        'send_messages': current_everyone.send_messages
+    }
+    
+    await channel.set_permissions(
+        everyone_role,
+        send_messages=False,
+        read_messages=None
+    )
+    
+    embed = nextcord.Embed(
+        description=f"🔒 Channel locked by {interaction.user.mention}",
+        color=BLUE
+    )
+    await interaction.response.send_message(embed=embed)
+
+@bot.slash_command(name="unlock", description="Unlock the channel")
+async def unlock_slash(interaction: nextcord.Interaction):
+    """Unlock the channel and restore original permissions"""
+    
+    # Check permission (Executive+ or Holding)
+    if not has_executive_or_holding(interaction.user):
+        await interaction.response.send_message(
+            "You are unable to use this command, as it is restricted to Executive+.",
+            ephemeral=True
+        )
+        return
+    
+    channel = interaction.channel
+    
+    # Check if channel is locked
+    if channel.id not in locked_channels:
+        await interaction.response.send_message(
+            "❌ This channel is not locked!",
+            ephemeral=True
+        )
+        return
+    
+    # Restore original permissions
+    original_overwrites = locked_channels[channel.id]
+    
+    for target_id, perms in original_overwrites.items():
+        if target_id == 'everyone':
+            everyone_role = interaction.guild.default_role
+            send_messages = perms.get('send_messages', None)
+            await channel.set_permissions(
+                everyone_role,
+                send_messages=send_messages
+            )
+        else:
+            role = interaction.guild.get_role(target_id)
+            if role:
+                send_messages = perms.get('send_messages', None)
+                await channel.set_permissions(
+                    role,
+                    send_messages=send_messages
+                )
+    
+    del locked_channels[channel.id]
+    
+    embed = nextcord.Embed(
+        description=f"🔓 Channel has been unlocked.",
+        color=BLUE
+    )
+    await interaction.response.send_message(embed=embed)
 
 # ------------------------------
 # SAY SLASH COMMAND
@@ -1431,20 +1578,68 @@ class StartSessionButton(nextcord.ui.View):
             timestamp=utcnow()
         )
         
+        # Get session channel from vote info
+        vote_info = None
+        for msg_id, info in bot.session_votes.items():
+            if info.get("initiator") == interaction.user.id:
+                vote_info = info
+                break
+        
+        if not vote_info:
+            await interaction.followup.send("❌ No active vote found.", ephemeral=True)
+            return
+        
+        session_channel = interaction.guild.get_channel(vote_info["channel_id"])
+        if not session_channel:
+            await interaction.followup.send("❌ Session channel not found.", ephemeral=True)
+            return
+        
+        # Delete all messages in the session channel except the pinned message
         try:
-            original_channel = interaction.guild.get_channel(SESSION_CHANNEL_ID)
-            if original_channel:
-                original_message = await original_channel.fetch_message(bot.session_votes.get(interaction.message.id, {}).get("message_id", 0))
-                if original_message:
-                    embed_update = nextcord.Embed(
-                        title="✅ Session Started!",
-                        description=f"The session has been started by {interaction.user.mention}!",
-                        color=0x00FF00,
-                        timestamp=utcnow()
-                    )
-                    await original_message.edit(embed=embed_update, view=None)
+            async for message in session_channel.history(limit=100):
+                if message.id != SESSION_PINNED_MESSAGE_ID:
+                    try:
+                        await message.delete()
+                    except:
+                        pass
         except:
             pass
+        
+        # Get ERLC stats
+        stats = await get_erlc_stats()
+        
+        # Count on-shift staff
+        on_shift_count = await count_on_shift_staff(interaction.guild)
+        
+        # Get player and queue info from stats
+        players_in_game = stats['players'] if stats else 0
+        max_players = stats['max_players'] if stats else 40
+        queue_count = stats['queue'] if stats else 0
+        
+        # Create session start embeds
+        # Embed 1 - Image
+        image_embed = nextcord.Embed(color=BLUE)
+        image_embed.set_image(url=SESSION_IMAGE_URL)
+        
+        # Embed 2 - Session info
+        session_embed = nextcord.Embed(
+            title="__ILSRP・Session Started__",
+            description=(
+                "Hello, Illinois State Roleplay Public Members.\n"
+                "> After enough votes with the <:Checkmark:1473460905634431109> reaction, the session has officially started. Below outline some statistics to refer to.\n\n"
+                f"> - In-Game Session Code: ```ILRPS```\n"
+                f"> - In-Game: ```{players_in_game}/{max_players}```\n"
+                f"> - In-Queue: ```{queue_count}/{max_players}```\n"
+                f"> - On-Shift: ```{on_shift_count}```"
+            ),
+            color=BLUE,
+            timestamp=utcnow()
+        )
+        
+        # Send the session start message
+        session_message = await session_channel.send(
+            embeds=[image_embed, session_embed]
+        )
         
         # Store the session message ID for auto-refresh
         bot.session_message_id = session_message.id
@@ -1455,9 +1650,12 @@ class StartSessionButton(nextcord.ui.View):
         
         await interaction.followup.send("✅ Session started successfully! (Will auto-refresh every 5 minutes)", ephemeral=True)
         
-        # Remove from vote tracking
-        if hasattr(bot, 'session_votes') and interaction.message.id in bot.session_votes:
-            del bot.session_votes[interaction.message.id]
+        # Clear vote tracking for this initiator
+        if hasattr(bot, 'session_votes'):
+            # Remove votes for this initiator
+            votes_to_remove = [msg_id for msg_id, info in bot.session_votes.items() if info.get("initiator") == interaction.user.id]
+            for msg_id in votes_to_remove:
+                del bot.session_votes[msg_id]
 
 @bot.event
 async def on_raw_reaction_add(payload):
