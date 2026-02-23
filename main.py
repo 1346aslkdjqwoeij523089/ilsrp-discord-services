@@ -616,9 +616,9 @@ async def on_member_remove(member):
         await outgoing_log_channel.send(embed=embed)
 
 # ------------------------------
-# Command Logging Helper
+# Command Logging Helper (Enhanced)
 # ------------------------------
-async def log_command(user, command_name, ctx_type):
+async def log_command(user, command_name, ctx_type, details: str = None):
     log_channel = bot.get_channel(LOG_CHANNEL_ID)
     if log_channel:
         embed = nextcord.Embed(
@@ -629,6 +629,8 @@ async def log_command(user, command_name, ctx_type):
         embed.set_author(name=f"{user}", icon_url=user.display_avatar.url)
         embed.add_field(name="Command", value=command_name, inline=True)
         embed.add_field(name="Type", value=ctx_type, inline=True)
+        if details:
+            embed.add_field(name="Details", value=details, inline=False)
         await log_channel.send(embed=embed)
 
 # ------------------------------
@@ -3163,6 +3165,25 @@ async def economy_manage(interaction: nextcord.Interaction):
 
 AFK_FOOTER_IMAGE = "https://cdn.discordapp.com/attachments/1472412365415776306/1475277452103258362/footerisrp.png?ex=699ce6b1&is=699b9531&hm=d0b11e03fb99f8ea16956ebe9e5e2b1bb657b5ea315c1f8638149f984325ca3a&"
 
+# AFK Allowed Roles (Administrator + specific roles)
+AFK_ALLOWED_ROLE_IDS = [
+    1471640542231396373,  # Administration
+    1472072792081170682,  # Evaluation
+    1471641790112333867,  # Supervision
+    1471641915215843559,  # Management
+    1471642126663024640,  # Executive
+    1471642360503992411,  # Holding
+]
+
+def can_use_afk(member):
+    """Check if member can use AFK command"""
+    # Check if user is administrator
+    if member.guild_permissions.administrator:
+        return True
+    # Check if user has any of the allowed roles
+    member_role_ids = [role.id for role in member.roles]
+    return any(rid in member_role_ids for rid in AFK_ALLOWED_ROLE_IDS)
+
 def get_afk_status(user_id):
     c.execute("SELECT * FROM afk WHERE user_id = ?", (user_id,))
     result = c.fetchone()
@@ -3193,22 +3214,43 @@ def add_ping(user_id, pinger_id, message_content):
         c.execute("UPDATE afk SET pings = ? WHERE user_id = ?", (json.dumps(pings), user_id))
         conn.commit()
 
-@bot.slash_command(name="afk", description="Set yourself as AFK")
+@bot.slash_command(name="afk", description="Set yourself as AFK (Staff only)")
 async def afk_slash(interaction: nextcord.Interaction, reason: str = "AFK"):
+    # Check if user has permission to use AFK
+    if not can_use_afk(interaction.user):
+        await interaction.response.send_message(
+            f"❌ {interaction.user.mention}, you don't have permission to use this command. You must be an Administrator or have a staff role (Administration, Evaluation, Supervision, Management, Executive, or Holding).",
+            ephemeral=False
+        )
+        return
+    
     set_afk(interaction.user.id, reason)
     
     embed = nextcord.Embed(
         title="💤 AFK Set",
-        description=f"You are now AFK: **{reason}**",
+        description=f"**{interaction.user.mention}** is now AFK: **{reason}**",
         color=BLUE
     )
     embed.set_image(url=AFK_FOOTER_IMAGE)
     
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed)
 
 @bot.command(name="afk")
 async def afk_prefix(ctx, *, reason: str = "AFK"):
-    await log_command(ctx.author, "afk", "Prefix")
+    await log_command(ctx.author, "afk", "Prefix", f"Reason: {reason}")
+    
+    # Check if user has permission to use AFK
+    if not can_use_afk(ctx.author):
+        try:
+            await ctx.message.delete()
+        except:
+            pass
+        error_msg = await ctx.send(
+            f"❌ {ctx.author.mention}, you don't have permission to use this command."
+        )
+        await error_msg.delete(delay=10)
+        return
+    
     set_afk(ctx.author.id, reason)
     
     try:
@@ -3218,7 +3260,7 @@ async def afk_prefix(ctx, *, reason: str = "AFK"):
     
     embed = nextcord.Embed(
         title="💤 AFK Set",
-        description=f"You are now AFK: **{reason}**",
+        description=f"**{ctx.author.mention}** is now AFK: **{reason}**",
         color=BLUE
     )
     embed.set_image(url=AFK_FOOTER_IMAGE)
@@ -4380,7 +4422,7 @@ async def help_slash(interaction: nextcord.Interaction):
     
     text_embed.add_field(
         name="🎫 Other Commands",
-        value="`/afk [reason]` - Set AFK status\n`/suggest [suggestion]` - Make a suggestion\n`/help` - Show this help message",
+        value="`/afk [reason]` - Set AFK status (Staff only)\n`/suggest [suggestion]` - Make a suggestion\n`/help` - Show this help message",
         inline=False
     )
     
@@ -6378,6 +6420,308 @@ async def load_modlogs_from_channel():
                 
     except Exception as e:
         print(f"Error loading modlogs: {e}")
+
+# =========================================================
+# =================== DM ROLE/USER SYSTEM ==================
+# =========================================================
+
+# DM Role allowed roles
+DMROLE_ALLOWED_ROLE_IDS = [
+    1471642360503992411,  # Holding
+    1471642126663024640,  # Executive
+]
+
+# DM User allowed roles
+DMUSER_ALLOWED_ROLE_IDS = [
+    1471642126663024640,  # Executive
+    1471642360503992411,  # Holding
+]
+
+# Owner role for DM Role cooldown exception
+OWNER_ROLE_ID = 1471642523821674618
+
+# Cooldown storage
+dmrole_cooldowns = {}
+
+def get_dmrole_cooldown(user_id):
+    """Get remaining cooldown for dmrole command"""
+    if user_id not in dmrole_cooldowns:
+        return 0
+    
+    guild = bot.guilds[0] if bot.guilds else None
+    if guild:
+        member = guild.get_member(user_id)
+        if member and OWNER_ROLE_ID in [role.id for role in member.roles]:
+            return 0
+    
+    last_used = dmrole_cooldowns[user_id]
+    current_time = int(time.time())
+    min_cooldown = 7200  # 2 hours
+    elapsed = current_time - last_used
+    if elapsed < min_cooldown:
+        return min_cooldown - elapsed
+    return 0
+
+def set_dmrole_cooldown(user_id):
+    """Set cooldown for dmrole command (randomized 2-4 hours)"""
+    dmrole_cooldowns[user_id] = int(time.time())
+
+async def find_member_by_input(guild, input_str):
+    """Find a member by ping, ID, nickname, or partial name match"""
+    if input_str.startswith('<@') and input_str.endswith('>'):
+        user_id_str = input_str.replace('<@', '').replace('>', '').replace('!', '')
+        try:
+            user_id = int(user_id_str)
+            member = guild.get_member(user_id)
+            if member:
+                return member
+        except:
+            pass
+    
+    try:
+        user_id = int(input_str)
+        member = guild.get_member(user_id)
+        if member:
+            return member
+    except:
+        pass
+    
+    try:
+        role_id = int(input_str)
+        role = guild.get_role(role_id)
+        if role:
+            return role.members
+    except:
+        pass
+    
+    for member in guild.members:
+        if member.nick and member.nick.lower() == input_str.lower():
+            return member
+    
+    if input_str.lower() == input_str.lower():
+        for member in guild.members:
+            if member.name.lower() == input_str.lower():
+                return member
+    
+    for member in guild.members:
+        if member.nick and input_str.lower() in member.nick.lower():
+            return member
+    
+    for member in guild.members:
+        if input_str.lower() in member.name.lower():
+            return member
+    
+    return None
+
+# DM Role Slash Command
+@bot.slash_command(name="dmrole", description="DM all members with a specific role")
+async def dmrole_slash(interaction: nextcord.Interaction, role: nextcord.Role, message: str):
+    member_role_ids = [r.id for r in interaction.user.roles]
+    
+    if not any(rid in DMROLE_ALLOWED_ROLE_IDS for rid in member_role_ids):
+        await interaction.response.send_message(
+            f"❌ {interaction.user.mention}, you don't have permission to use this command.",
+            ephemeral=True
+        )
+        return
+    
+    if OWNER_ROLE_ID not in member_role_ids:
+        cooldown_remaining = get_dmrole_cooldown(interaction.user.id)
+        if cooldown_remaining > 0:
+            hours = cooldown_remaining // 3600
+            minutes = (cooldown_remaining % 3600) // 60
+            await interaction.response.send_message(
+                f"❌ {interaction.user.mention}, you must wait **{hours}h {minutes}m** before using this command again.",
+                ephemeral=True
+            )
+            return
+    
+    set_dmrole_cooldown(interaction.user.id)
+    await interaction.response.defer()
+    
+    members = role.members
+    if not members:
+        await interaction.followup.send(
+            f"❌ No members found with the role **{role.name}**.",
+            ephemeral=True
+        )
+        return
+    
+    success_count = 0
+    fail_count = 0
+    
+    for member in members:
+        try:
+            embed = nextcord.Embed(
+                title="📬 Message from Illinois State Roleplay Staff",
+                description=f"**Message:**\n{message}",
+                color=BLUE
+            )
+            embed.set_footer(text="Illinois State Roleplay")
+            await member.send(embed=embed)
+            success_count += 1
+        except:
+            fail_count += 1
+        await asyncio.sleep(0.5)
+    
+    await log_command(
+        interaction.user, 
+        "dmrole (slash)", 
+        "Slash",
+        f"Role: {role.name} ({role.id}) | Message: {message[:100]}... | Sent: {success_count} | Failed: {fail_count}"
+    )
+    
+    await interaction.followup.send(
+        f"✅ Message sent to **{success_count}** members with the role **{role.name}**.\n❌ Failed: **{fail_count}**",
+        ephemeral=True
+    )
+
+# DM Role Prefix Command
+@bot.command(name="dmrole")
+async def dmrole_prefix(ctx, role_id: int, *, message: str):
+    member_role_ids = [r.id for r in ctx.author.roles]
+    
+    if not any(rid in DMROLE_ALLOWED_ROLE_IDS for rid in member_role_ids):
+        await ctx.send(f"❌ {ctx.author.mention}, you don't have permission.", delete_after=10)
+        return
+    
+    if OWNER_ROLE_ID not in member_role_ids:
+        cooldown_remaining = get_dmrole_cooldown(ctx.author.id)
+        if cooldown_remaining > 0:
+            hours = cooldown_remaining // 3600
+            minutes = (cooldown_remaining % 3600) // 60
+            await ctx.send(f"❌ Wait **{hours}h {minutes}m**", delete_after=10)
+            return
+    
+    set_dmrole_cooldown(ctx.author.id)
+    
+    role = ctx.guild.get_role(role_id)
+    if not role:
+        await ctx.send(f"❌ Role not found.", delete_after=10)
+        return
+    
+    members = role.members
+    if not members:
+        await ctx.send(f"❌ No members with this role.", delete_after=10)
+        return
+    
+    success_count = 0
+    fail_count = 0
+    
+    for member in members:
+        try:
+            embed = nextcord.Embed(
+                title="📬 Message from Illinois State Roleplay Staff",
+                description=f"**Message:**\n{message}",
+                color=BLUE
+            )
+            embed.set_footer(text="Illinois State Roleplay")
+            await member.send(embed=embed)
+            success_count += 1
+        except:
+            fail_count += 1
+        await asyncio.sleep(0.5)
+    
+    await log_command(
+        ctx.author, 
+        "dmrole (prefix)", 
+        "Prefix",
+        f"Role: {role.name} ({role.id}) | Sent: {success_count} | Failed: {fail_count}"
+    )
+    
+    await ctx.send(f"✅ Sent to **{success_count}** | ❌ Failed: **{fail_count}**")
+
+# DM User Slash Command
+@bot.slash_command(name="dmuser", description="DM a specific user")
+async def dmuser_slash(interaction: nextcord.Interaction, user: nextcord.Member, message: str):
+    member_role_ids = [r.id for r in interaction.user.roles]
+    
+    if not any(rid in DMUSER_ALLOWED_ROLE_IDS for rid in member_role_ids):
+        await interaction.response.send_message(
+            f"❌ {interaction.user.mention}, you don't have permission.",
+            ephemeral=True
+        )
+        return
+    
+    target_member = user
+    if not target_member:
+        target_member = await find_member_by_input(interaction.guild, str(user))
+    
+    if not target_member or not isinstance(target_member, nextcord.Member):
+        await interaction.response.send_message(f"❌ User not found.", ephemeral=True)
+        return
+    
+    try:
+        embed = nextcord.Embed(
+            title="📬 Message from Illinois State Roleplay Staff",
+            description=f"`Message From:` {interaction.user.mention}\n`Message To:` {target_member.mention}\n`Message:` {message}",
+            color=BLUE
+        )
+        embed.set_footer(text="Illinois State Roleplay")
+        await target_member.send(embed=embed)
+        
+        await log_command(
+            interaction.user, 
+            "dmuser (slash)", 
+            "Slash",
+            f"To: {target_member.mention} ({target_member.id}) | Message: {message[:100]}"
+        )
+        
+        await interaction.response.send_message(f"✅ Message sent to **{target_member.mention}**!", ephemeral=True)
+    except:
+        await interaction.response.send_message(f"❌ Failed to send DM.", ephemeral=True)
+
+# DM User Prefix Command  
+@bot.command(name="dmuser")
+async def dmuser_prefix(ctx, *, args):
+    parts = args.split(' ', 1)
+    if len(parts) < 2:
+        await ctx.send(f"❌ Usage: >dmuser [user] [message]", delete_after=15)
+        return
+    
+    user_input = parts[0]
+    message = parts[1]
+    
+    member_role_ids = [r.id for r in ctx.author.roles]
+    
+    if not any(rid in DMUSER_ALLOWED_ROLE_IDS for rid in member_role_ids):
+        await ctx.send(f"❌ {ctx.author.mention}, you don't have permission.", delete_after=10)
+        return
+    
+    target = await find_member_by_input(ctx.guild, user_input)
+    
+    if isinstance(target, list):
+        if len(target) > 0:
+            target = target[0]
+        else:
+            await ctx.send(f"❌ No members found.", delete_after=10)
+            return
+    
+    if not target or not isinstance(target, nextcord.Member):
+        await ctx.send(f"❌ User not found: **{user_input}**", delete_after=10)
+        return
+    
+    target_member = target
+    
+    try:
+        embed = nextcord.Embed(
+            title="📬 Message from Illinois State Roleplay Staff",
+            description=f"`Message From:` {ctx.author.mention}\n`Message To:` {target_member.mention}\n`Message:` {message}",
+            color=BLUE
+        )
+        embed.set_footer(text="Illinois State Roleplay")
+        await target_member.send(embed=embed)
+        
+        await log_command(
+            ctx.author, 
+            "dmuser (prefix)", 
+            "Prefix",
+            f"To: {target_member.mention} ({target_member.id}) | Message: {message[:100]}"
+        )
+        
+        await ctx.send(f"✅ Message sent to **{target_member.mention}**!")
+    except:
+        await ctx.send(f"❌ Failed to send DM.", delete_after=10)
 
 # ==================== END MODERATION SYSTEM ====================
 
