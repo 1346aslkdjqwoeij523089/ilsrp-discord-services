@@ -1,7 +1,6 @@
 nextcord
 flask
-chat-exporter
-requests
-pytz
-wavelink
-spotipy
+python-dotenv
+motor
+aiohttp
+pymongo
